@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Tesseract from 'tesseract.js';
+import type { Worker } from 'tesseract.js';
 import { Calculator, Image as ImageIcon, Loader2, Upload, AlertCircle, Copy, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculatorStore, CalculatorState } from '@/lib/calculatorStore';
@@ -7,10 +7,12 @@ import { calculatorStore, CalculatorState } from '@/lib/calculatorStore';
 const EXCHANGE_RATE = 1180;
 const PROMO_MULTIPLIER = 0.6;
 
-let workerPromise: Promise<Tesseract.Worker> | null = null;
+let workerPromise: Promise<Worker> | null = null;
 const getWorker = () => {
   if (!workerPromise) {
-    workerPromise = Tesseract.createWorker('eng');
+    workerPromise = import('tesseract.js').then(({ default: Tesseract }) =>
+      Tesseract.createWorker('eng')
+    );
   }
   return workerPromise;
 };

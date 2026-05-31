@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import Tesseract from 'tesseract.js';
+import type { Worker } from 'tesseract.js';
 import { Calculator, Image as ImageIcon, Loader2, Upload, AlertCircle, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -7,10 +7,12 @@ const EXCHANGE_RATE = 1180; // 1 USD = 1180 IQD (based on user's 100 -> 118,000)
 const PROMO_MULTIPLIER = 0.6;
 
 // Pre-initialize Tesseract worker to speed up subsequent scans
-let workerPromise: Promise<Tesseract.Worker> | null = null;
+let workerPromise: Promise<Worker> | null = null;
 const getWorker = () => {
   if (!workerPromise) {
-    workerPromise = Tesseract.createWorker('eng');
+    workerPromise = import('tesseract.js').then(({ default: Tesseract }) =>
+      Tesseract.createWorker('eng')
+    );
   }
   return workerPromise;
 };
