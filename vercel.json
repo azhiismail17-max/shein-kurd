@@ -1,7 +1,7 @@
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "devCommand": "npm run dev",
+  "outputDirectory": ".output/public",
+  "framework": "other",
+  "serverFunctions": [".output/server/**"],
   "env": {}
 }
