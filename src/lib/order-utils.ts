@@ -173,10 +173,6 @@ export function getDisplayPrice(order: Order, allOrders?: Order[]): number {
 export function getOrderShipping(order: Order): number {
   const placeLower = String(order.place || '').toLowerCase();
   if (placeLower.includes('no location')) return 0;
-
-  const explicitShipping = Number(String(order.shipping_cost || '').replace(/[^0-9.-]+/g, ''));
-  if (Number.isFinite(explicitShipping) && explicitShipping !== 0) return Math.abs(explicitShipping);
-
   return getRegionShipping(order.place);
 }
 
@@ -200,11 +196,7 @@ export function getLinkedOrdersInfo(order: Order, allOrders: Order[]) {
 
   const isFree = isOrderFree(order) || linkedOrders.some(lo => isOrderFree(lo));
 
-  const explicitShippingOrder = [order, ...linkedOrders].find(o => {
-    const value = Number(String(o.shipping_cost || '').replace(/[^0-9.-]+/g, ''));
-    return Number.isFinite(value) && value !== 0;
-  });
-  const shipping = explicitShippingOrder ? Math.abs(Number(String(explicitShippingOrder.shipping_cost).replace(/[^0-9.-]+/g, ''))) : getOrderShipping(order);
+  const shipping = getOrderShipping(order);
 
   const total = combinedPrice + (isFree ? 0 : shipping);
   const remaining = total - combinedInitial;

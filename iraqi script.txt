@@ -284,17 +284,6 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
 
-    if (data.action === "update_shipping") { //
-      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
-      var sheet = ss.getSheetByName(sheetName); //
-      if (sheet) { //
-        if (data.row_ids && Array.isArray(data.row_ids)) { //
-          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 8).setValue(data.value); } //
-        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 8).setValue(data.value); } //
-      }
-      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
-    }
-
     if (data.action === "update_box_name") { //
       var ss = SpreadsheetApp.getActiveSpreadsheet(); //
       var sheet = ss.getSheetByName(sheetName); //
@@ -652,6 +641,19 @@ function handleOrder(data, sheetName) {
   var sheet = ss.getSheetByName(sheetName); //
   if (!sheet) { try { sheet = ss.insertSheet(sheetName); } catch(e) { return { 'result': 'error', 'message': 'Could not create sheet: ' + sheetName }; //
   } } //
+
+  var requestId = (data.client_request_id || data.request_id || "").toString().trim(); //
+  if (requestId && (!data.row_id || data.row_id === "")) { //
+    var lastRequestRow = Math.min(sheet.getLastRow(), MAX_ROW_LIMIT); //
+    if (lastRequestRow >= 4) { //
+      var requestIds = sheet.getRange(4, 29, lastRequestRow - 3, 1).getValues(); //
+      for (var reqIdx = 0; reqIdx < requestIds.length; reqIdx++) { //
+        if (requestIds[reqIdx][0] && requestIds[reqIdx][0].toString() === requestId) { //
+          return { 'result': 'success', 'status': 'success', 'message': 'Created Row ' + (reqIdx + 4), 'deduped': true }; //
+        } //
+      } //
+    } //
+  } //
   
   var targetRow; //
   var isUpdate = false; //
@@ -800,10 +802,13 @@ function handleOrder(data, sheetName) {
   if (data.price === '') { sheet.getRange(targetRow, 5).clearContent(); //
   } else { sheet.getRange(targetRow, 5).setValue(sheetItemPrice).setNumberFormat("#,##0"); //
   } //
-
   sheet.getRange(targetRow, 7).setValue(data.pics_text || ''); //
   sheet.getRange(targetRow, 9).setValue(finalPhone); //
   if (data.box_name !== undefined) { sheet.getRange(targetRow, 10).setValue(data.box_name); //
+  } //
+  if (requestId) { //
+    sheet.getRange(targetRow, 29).setValue(requestId); //
+    try { sheet.hideColumns(29); } catch(e) {} //
   } //
 
   var extraText = (data.extra || "").toString().trim(); //

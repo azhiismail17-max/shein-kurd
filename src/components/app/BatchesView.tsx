@@ -109,7 +109,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({ orders, allOrders, o
       const totalPrice = boxOrders.reduce((s, o) => s + (parseFloat(String(o.price).replace(/[^0-9.-]+/g, '')) || 0), 0);
       const orderWithBoxCost = boxOrders.find(o => Number(String(o.box_cost || '').replace(/[^0-9.-]+/g, '')) > 0) || boxOrders[0];
       const boxCost = Number(String(orderWithBoxCost?.box_cost || '').replace(/[^0-9.-]+/g, '')) || 0;
-      const orderWithShippingCost = boxOrders.find(o => Number(String(o.shipping_cost || '').replace(/[^0-9.-]+/g, '')) !== 0) || boxOrders[0];
+      const orderWithShippingCost = boxOrders.find(o => Number(String(o.shipping_cost || '').replace(/[^0-9.-]+/g, '')) > 0) || boxOrders[0];
       const shippingCost = Number(String(orderWithShippingCost?.shipping_cost || '').replace(/[^0-9.-]+/g, '')) || 0;
       const lostLevelOrder = boxOrders.find(o => Number(String(o.lost || '').replace(/[^0-9.-]+/g, '')) > 0) || boxOrders[0];
       const profitLevelOrder = boxOrders.find(o => Number(String(o.profit || '').replace(/[^0-9.-]+/g, '')) > 0) || boxOrders[0];

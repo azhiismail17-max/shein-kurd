@@ -1,4 +1,0 @@
-const tsrStartManifest = () => ({ routes: { __root__: { filePath: "C:/Users/AZHI1/OneDrive/Desktop/kurdisatbi/file-flasher-main/src/routes/__root.tsx", children: ["/", "/$", "/iraqi"], preloads: ["/assets/index-tUVheicB.js"], scripts: [{ attrs: { type: "module", async: true, src: "/assets/index-tUVheicB.js" } }] }, "/": { filePath: "C:/Users/AZHI1/OneDrive/Desktop/kurdisatbi/file-flasher-main/src/routes/index.tsx", children: void 0, preloads: ["/assets/index-CvcD5FdL.js"] }, "/$": { filePath: "C:/Users/AZHI1/OneDrive/Desktop/kurdisatbi/file-flasher-main/src/routes/$.tsx", children: void 0, preloads: ["/assets/_-CvcD5FdL.js"] }, "/iraqi": { filePath: "C:/Users/AZHI1/OneDrive/Desktop/kurdisatbi/file-flasher-main/src/routes/iraqi.tsx", children: void 0, preloads: ["/assets/iraqi-DvNmUYOC.js", "/assets/GlobalCalculator-c1n-7y-J.js"] } } });
-export {
-  tsrStartManifest
-};

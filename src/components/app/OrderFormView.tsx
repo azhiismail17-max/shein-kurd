@@ -29,7 +29,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
   const [formData, setFormData] = useState<Partial<Order>>({
     sheet_name: activeSheet, insta: '', name: '', link: '', place: '', price: '',
     initial_payment: '0', phone: '', phone2: '', pics_text: '1', note: '',
-    box_cost: '', shipping_cost: ''
+    box_cost: ''
   });
   const [region, setRegion] = useState<Region>('');
   
@@ -39,9 +39,6 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
     const saved = localStorage.getItem('last_region') as Region;
     if (saved && !isEditing) {
       setRegion(saved);
-      const isOutsideErbil = saved === 'outside_erbil' || saved === 'sulaymani' || saved === 'duhok' || saved === 'kirkuk' || saved === 'zaxo';
-      const cost = saved === 'erbil' ? 3000 : isOutsideErbil ? 5000 : saved === 'outside_kurdistan' ? 6000 : 0;
-      setFormData(prev => ({ ...prev, shipping_cost: cost }));
     }
   }, [isEditing]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -170,8 +167,6 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
       const r = value as Region;
       setRegion(r);
       localStorage.setItem('last_region', r);
-      const isOutsideErbil = r === 'outside_erbil' || r === 'sulaymani' || r === 'duhok' || r === 'kirkuk' || r === 'zaxo';
-      const cost = r === 'erbil' ? 3000 : isOutsideErbil ? 5000 : r === 'outside_kurdistan' ? 6000 : 0;
       
       let placePrefix = '';
       if (r === 'erbil') placePrefix = 'Erbil - ';
@@ -188,7 +183,6 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         currentPlace = currentPlace.replace(/^(Erbil|Sulaymani|Duhok|Kirkuk|Zaxo|Iraq|Outside Erbil|No Location)\s*-\s*/i, '');
         return { 
           ...prev, 
-          shipping_cost: cost,
           place: placePrefix + currentPlace
         };
       });
@@ -205,24 +199,23 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
     // Derive region from place
     const place = String(s.place || '').toLowerCase();
     let derivedRegion: Region = '';
-    let shippingCost = 0;
     
     if (place.includes('no location')) {
-      derivedRegion = 'no_location'; shippingCost = 0;
+      derivedRegion = 'no_location';
     } else if (place.includes('erbil') || place.includes('hawler') || place.includes('هەولێر')) {
-      derivedRegion = 'erbil'; shippingCost = 3000;
+      derivedRegion = 'erbil';
     } else if (place.includes('sulaymani')) {
-      derivedRegion = 'sulaymani'; shippingCost = 5000;
+      derivedRegion = 'sulaymani';
     } else if (place.includes('duhok')) {
-      derivedRegion = 'duhok'; shippingCost = 5000;
+      derivedRegion = 'duhok';
     } else if (place.includes('kirkuk')) {
-      derivedRegion = 'kirkuk'; shippingCost = 5000;
+      derivedRegion = 'kirkuk';
     } else if (place.includes('zaxo') || place.includes('zakho')) {
-      derivedRegion = 'zaxo'; shippingCost = 5000;
+      derivedRegion = 'zaxo';
     } else if (place.includes('halabja') || place.includes('koya') || place.includes('ranya') || place.includes('soran')) {
-      derivedRegion = 'outside_erbil'; shippingCost = 5000;
+      derivedRegion = 'outside_erbil';
     } else if (place && !place.includes('erbil')) {
-      derivedRegion = 'outside_erbil'; shippingCost = 5000;
+      derivedRegion = 'outside_erbil';
     }
 
     setFormData(prev => ({
@@ -233,7 +226,6 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
       phone: String(s.phone || '').split('/')[0].trim() || prev.phone,
       phone2: s.phone2 || prev.phone2,
       pics_text: s.pics_text || prev.pics_text,
-      shipping_cost: shippingCost || prev.shipping_cost,
     }));
     if (derivedRegion) setRegion(derivedRegion);
     setShowSuggestions(false);
@@ -319,6 +311,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         newBoxNameAttr = findAutoBoxName(currentMonthOrders, pieces);
       }
 
+      const tempId = isEditing ? undefined : Date.now();
       const payload = { 
           ...formData, 
           price: formData.price,
@@ -329,7 +322,8 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
           note: cleanNote, 
           linkedOrderIds: linkedIds, 
           sheet: isEditing ? formData.sheet_name : activeSheet, 
-          row_id: isEditing ? editingOrder!.id : '' 
+          row_id: isEditing ? editingOrder!.id : '',
+          client_request_id: tempId ? `kurdistani-${activeSheet}-${tempId}` : undefined
       };
 
       // EDIT path: optimistic — close form instantly, sync to sheet in background.
@@ -356,7 +350,6 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
 
       // NEW order: optimistic — show it on the list NOW with a temp id, then reconcile
       // with the real row id once Apps Script responds. This kills the 10–15s wait.
-      const tempId = Date.now();
       const optimisticPayload = { ...payload, row_id: tempId, _tempId: tempId };
       onSuccess(optimisticPayload);
       setIsSubmitting(false);
