@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   LayoutDashboard, Users, ShoppingCart, Package, Truck, Search,
-  Menu, X, Sun, Moon, Calculator, ChevronLeft, Camera, LogOut, Bell, MessageCircle, Plus, Wallet
+  Menu, X, Calculator, ChevronLeft, Camera, LogOut, Bell, MessageCircle, Plus, Wallet
 } from 'lucide-react';
 import { YEARS_CONFIG } from '@/types';
 
@@ -49,7 +49,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({
   currentSystem = 'kurdistani', onSystemChange
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [searchExpanded, setSearchExpanded] = useState(false);
   
   const [localSearch, setLocalSearch] = useState(searchQuery);
@@ -122,14 +121,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     return () => clearTimeout(t);
   }, [localSearch, setSearchQuery, searchQuery]);
 
-  const toggleTheme = () => {
-    setIsDark(d => {
-      const next = !d;
-      document.documentElement.classList.toggle('dark', next);
-      return next;
-    });
-  };
-
   const showBack = activeTab === 'new-order';
 
   const menuItems = ALL_MENU_ITEMS.filter(item => {
@@ -152,7 +143,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-card border-r border-border transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+      <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-[82vw] max-w-72 lg:w-64 bg-card border-r border-border transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
         <div className="h-full flex flex-col">
           <div className="p-5 flex items-center justify-between border-b border-border">
             <div className="flex items-center gap-3">
@@ -196,10 +187,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
           <div className="p-4 border-t border-border space-y-3">
             <ThemeColorPicker />
-            <button onClick={toggleTheme} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-all">
-              {isDark ? <Sun size={18} /> : <Moon size={18} />}
-              <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
-            </button>
             <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-all font-medium">
               <LogOut size={18} />
               <span>Sign Out</span>
@@ -210,7 +197,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="bg-card/80 backdrop-blur-xl border-b border-border sticky top-0 z-30 shrink-0">
-          <div className="px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="px-2 sm:px-4 py-1.5 sm:py-3 flex items-center justify-between gap-1.5 sm:gap-3">
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => setSidebarOpen(true)} className="lg:hidden relative p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-colors">
                 <Menu size={20} />
@@ -225,7 +212,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
               )}
             </div>
 
-            <div className="flex-1 w-full max-w-[180px] sm:max-w-2xl">
+            <div className="flex-1 min-w-0 w-full max-w-none sm:max-w-2xl">
               <div className="relative w-full group">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" size={16} />
                 <input
@@ -236,7 +223,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
                     setLocalSearch(e.target.value);
                     if (e.target.value && activeTab !== 'orders') setActiveTab('orders');
                   }}
-                  className="w-full bg-secondary border border-border text-foreground text-sm rounded-lg pl-9 pr-8 py-2 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground"
+                  className="w-full bg-secondary border border-border text-foreground text-base sm:text-sm rounded-lg pl-9 pr-8 py-1.5 sm:py-2 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground"
                 />
                 {localSearch && (
                   <button onClick={() => { setLocalSearch(''); setSearchQuery?.(''); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground">
@@ -246,7 +233,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
               {isSearchingAll && (
                 <div className="hidden sm:flex flex items-center gap-2 text-xs text-primary font-medium mr-2">
                   <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -255,12 +242,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({
               )}
               <NotificationsDropdown role={role} onNotificationClick={onNotificationClick} />
               {role === 'owner' && <SystemSwitcher role={role} current={currentSystem} onChange={onSystemChange} />}
-              <ThemeColorPicker compact />
-              <button onClick={onCameraSearch} className="p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Image Search">
+              <button onClick={onCameraSearch} className="p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Image Search">
                 <Camera size={18} />
               </button>
               {role === 'owner' && (
-                <button onClick={onSearchAll} className="p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Global Ledger">
+                <button onClick={onSearchAll} className="p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Price Calc">
                   <Calculator size={18} />
                 </button>
               )}
@@ -268,7 +254,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
         </header>
 
-        <main className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'overflow-hidden p-0' : 'overflow-y-auto p-4 lg:p-6 custom-scrollbar'}`}>
+        <main className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'overflow-hidden p-0' : 'overflow-y-auto p-2 sm:p-4 lg:p-6 custom-scrollbar'}`}>
           {children}
         </main>
       </div>

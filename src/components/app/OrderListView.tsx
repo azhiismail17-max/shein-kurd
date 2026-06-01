@@ -5,8 +5,9 @@ import MonthSelector from './MonthSelector';
 import { SkuSearch } from './SkuSearch';
 import { getLinkedOrdersInfo, getCustomerTotalPrice, isOrderFree, cleanOrderNo, uploadToImgBB, getBoxName } from '@/lib/order-utils';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
-import { QRScannerModal } from './QRScannerModal';
 import { sendNotification } from '@/lib/notifications';
+
+const QRScannerModal = React.lazy(() => import('./QRScannerModal').then(mod => ({ default: mod.QRScannerModal })));
 
 const getPrimaryImg = (order: Order) => {
   const urls = String(order.primary_urls || '').split(',').filter(Boolean);
@@ -413,10 +414,10 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
   }
 
   return (
-    <div className="animate-slide-up space-y-3">
+    <div className="animate-slide-up space-y-2 sm:space-y-3">
       {!isDeliveryTab && <MonthSelector viewingMonth={viewingMonth} setViewingMonth={setViewingMonth} activeYear={activeYear} setActiveYear={setActiveYear} availableMonths={availableMonths} />}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex gap-1.5">
           <button onClick={() => setViewMode('table')} className={`p-2 rounded-lg transition-all ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary'}`}><FileText size={16} /></button>
           <button onClick={() => setViewMode('gallery')} className={`p-2 rounded-lg transition-all ${viewMode === 'gallery' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary'}`}><Package size={16} /></button>
@@ -427,21 +428,21 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
           )}
         </div>
         
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground mr-2">{orders.length} orders</span>
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <span className="text-[11px] sm:text-xs font-medium text-muted-foreground sm:mr-2">{orders.length} orders</span>
           {isDeliveryTab && (role === 'owner' || role === 'admin') && (
             <>
               <button onClick={() => setShowQRScanner(true)} className="flex items-center justify-center p-1.5 rounded-lg bg-orange-500/10 text-orange-600 hover:bg-orange-500/20 transition-all border border-orange-200" title="Scan QR Code">
                 <Scan size={18} />
               </button>
-              <button onClick={handleManualDelivery} className="flex items-center gap-1.5 bg-orange-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-orange-700 transition-all shadow-sm">
+              <button onClick={handleManualDelivery} className="flex items-center gap-1.5 bg-orange-600 text-white px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium hover:bg-orange-700 transition-all shadow-sm">
                 <Plus size={14} /> <span className="hidden sm:inline">Add Delivery</span><span className="sm:hidden">Add</span>
               </button>
             </>
           )}
           {!isDeliveryTab && <SkuSearch orders={allOrders} onFound={onOrderClick} />}
           {!isDeliveryTab && onNewOrder && (
-            <button onClick={onNewOrder} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-all shadow-sm">
+            <button onClick={onNewOrder} className="flex items-center gap-1.5 bg-primary text-primary-foreground px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium hover:bg-primary/90 transition-all shadow-sm">
               <Plus size={14} /> <span className="hidden sm:inline">New Order</span><span className="sm:hidden">New</span>
             </button>
           )}
@@ -449,7 +450,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
       </div>
 
       {viewMode === 'gallery' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
           {groupedOrders.map(group => {
             const order = group.baseOrder;
             const boxName = getBoxName(order);
@@ -457,7 +458,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
             const isVerified = verifiedOrders.has(key);
             const isMissing = missingOrders.has(key) || !!order.warningBase64 || !!order.warningImageUrl;
             const status = getOrderStatus(order);
-            const individualPrice = getCustomerTotalPrice(order);
+            const individualPrice = getCustomerTotalPrice(order, allOrders);
             const isFree = isOrderFree(order);
             
             return (
@@ -531,13 +532,13 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
           })}
         </div>
       ) : (
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-lg sm:rounded-xl border border-border overflow-hidden">
           {/* Mobile List */}
           <div className="divide-y divide-border">
             {groupedOrders.map(group => {
               const order = group.baseOrder;
               const status = getOrderStatus(order);
-              const individualPrice = getCustomerTotalPrice(order);
+              const individualPrice = getCustomerTotalPrice(order, allOrders);
               const isFree = isOrderFree(order);
               const initial = parseFloat(String(order.initial_payment).replace(/[^0-9.-]+/g, '')) || 0;
               const remaining = individualPrice - initial;
@@ -549,7 +550,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
               
               return (
                 <React.Fragment key={`${key}-m`}>
-                  <div className={`p-2 sm:p-2.5 flex items-center gap-2 transition-colors cursor-pointer active:scale-[0.98] ${selectedOrders.has(key) ? 'bg-primary/10' : isVerified ? 'bg-primary/5' : isMissing ? 'bg-amber-50 dark:bg-amber-500/5' : ''} ${STATUS_ROW_COLORS[status]}`}
+                  <div className={`p-1.5 sm:p-2.5 flex items-center gap-2 transition-colors cursor-pointer active:scale-[0.98] ${selectedOrders.has(key) ? 'bg-primary/10' : isVerified ? 'bg-primary/5' : isMissing ? 'bg-amber-50 dark:bg-amber-500/5' : ''} ${STATUS_ROW_COLORS[status]}`}
                     onClick={(e) => {
                       if (isSelectMode) { toggleSelect(order, e); return; }
                       onOrderClick(order);
@@ -564,7 +565,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
                         <AlertTriangle size={10} />
                       </button>
                     )}
-                    <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg bg-secondary flex items-center justify-center shrink-0 overflow-hidden border border-border relative">
+                    <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-lg bg-secondary flex items-center justify-center shrink-0 overflow-hidden border border-border relative">
                       {getPrimaryImg(order) ? (
                         <img src={getPrimaryImg(order)!} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('bg-green-500/20'); }} />
                       ) : (
@@ -579,7 +580,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
                       )}
                     </div>
                     <div className="flex-1 min-w-0 pr-1">
-                      <div className="font-bold text-[14px] sm:text-[15px] leading-tight mb-0.5 truncate">
+                      <div className="font-bold text-[13px] sm:text-[15px] leading-tight mb-0.5 truncate">
                         @{order.insta || 'Unknown'}
                       </div>
 
@@ -595,7 +596,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
                         {!isDeliveryTab && order.sku && <span className="text-[9px] bg-secondary/50 px-1 py-0 rounded font-mono text-muted-foreground">SKU: {order.sku}</span>}
                       </div>
 
-                      <div className="text-[10px] sm:text-[11px] text-muted-foreground leading-tight truncate">
+                      <div className="text-[9px] sm:text-[11px] text-muted-foreground leading-tight truncate">
                         {order.date ? order.date : (order.orderNo ? `#${cleanOrderNo(order.orderNo)}` : '#Pending')} · {order.sheet_name}
                       </div>
 
@@ -622,8 +623,8 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
                         <button onClick={(e) => handleVerify(order, e)} className={`transition-all flex items-center justify-center ${isVerified ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}><Heart size={12} fill={isVerified ? 'currentColor' : 'none'} /></button>
                       </div>
 
-                      <div className="flex flex-col items-end justify-center min-w-[55px]">
-                        <div className="font-bold text-[14px] sm:text-[15px] leading-none tracking-tight">{individualPrice.toLocaleString()}</div>
+                      <div className="flex flex-col items-end justify-center min-w-[50px] sm:min-w-[55px]">
+                        <div className="font-bold text-[13px] sm:text-[15px] leading-none tracking-tight">{individualPrice.toLocaleString()}</div>
                         <div className={`text-[10px] font-bold mt-1 tracking-tight ${remaining > 0 ? 'text-amber-500' : 'text-primary'}`}>
                           {remaining > 0 ? `${remaining.toLocaleString()} due` : '✅ Paid'}
                         </div>
@@ -698,7 +699,9 @@ const OrderListView: React.FC<OrderListViewProps> = ({ orders, onEdit, onDelete,
       )}
       
       {showQRScanner && (
-        <QRScannerModal onScan={handleQRScan} onClose={() => setShowQRScanner(false)} />
+        <React.Suspense fallback={null}>
+          <QRScannerModal onScan={handleQRScan} onClose={() => setShowQRScanner(false)} />
+        </React.Suspense>
       )}
     </div>
   );

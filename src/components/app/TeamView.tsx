@@ -3,7 +3,7 @@ import { Users, User, Shield, Search, Package, Activity } from 'lucide-react';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { Order } from '@/types';
 import { normalizeTeamUsername } from '@/lib/teamActivity';
-import { fetchCombinedAuthUsers, getUserStatsForProfile, SOURCE_STYLES } from '@/lib/combinedProfile';
+import { fetchCombinedAuthUsers, getUserStatsForProfile } from '@/lib/combinedProfile';
 import UserProfileModal from './UserProfileModal';
 
 interface AuthUser {
@@ -19,10 +19,10 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
   const [search, setSearch] = useState('');
   const [profileTarget, setProfileTarget] = useState<{username: string, role: string} | null>(null);
   const [stats, setStats] = useState<Record<string, any>>({});
-  const canViewLiveStats = role === 'owner' || role === 'admin';
+  const canViewTeamStats = role === 'owner' || role === 'admin';
+  const currentUserKey = normalizeTeamUsername(currentUser);
 
   useEffect(() => {
-    if (!canViewLiveStats) return;
     let unsubscribe: () => void = () => {};
     import('firebase/firestore').then(({ collection, onSnapshot }) => {
       import('@/lib/firebase').then(({ db }) => {
@@ -40,7 +40,7 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
       });
     });
     return () => unsubscribe();
-  }, [canViewLiveStats]);
+  }, []);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -55,7 +55,10 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
     fetchUsers();
   }, [profileMode]);
 
-  const filtered = users.filter(u => {
+  const visibleUsers = canViewTeamStats
+    ? users
+    : (users.length > 0 ? users : [{ username: currentUser, role }]);
+  const filtered = visibleUsers.filter(u => {
     return String(u?.username || '').toLowerCase().includes(search.toLowerCase()) || String(u?.role || '').toLowerCase().includes(search.toLowerCase());
   });
 
@@ -89,13 +92,13 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
           {filtered.map((u, i) => {
             const profileStats = getUserStatsForProfile(stats, u.username, profileMode);
             const visibleOrders = profileStats.recentOrders.filter((order: any) => allOrders.some(o => String(o.id) === String(order.id) && o.sheet_name === order.sheet));
-            const recentOrders = visibleOrders.slice(0, 3);
             const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' });
             const visibleTodayOrders = visibleOrders.filter((order: any) => order.createdAt && new Date(order.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' }) === todayKey).length;
+            const canViewThisUserStats = canViewTeamStats || normalizeTeamUsername(u.username) === currentUserKey;
             
             return (
               <div key={i} onClick={() => setProfileTarget(u)} className="bg-card hover:bg-accent/50 transition-colors border rounded-xl p-4 cursor-pointer flex flex-col gap-3 group relative shadow-sm">
-                {canViewLiveStats && profileStats.isOnline && (
+                {canViewTeamStats && profileStats.isOnline && (
                   <div title="Online Now" className="absolute top-4 right-4 w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shadow-sm" />
                 )}
                 
@@ -115,42 +118,21 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
                   </div>
                 </div>
                 
-                {canViewLiveStats && (
-                  <>
-                    <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider flex items-center gap-1 mb-1">
-                          <Activity className="h-3 w-3" /> Today
-                        </span>
-                        <span className="font-bold text-lg leading-none">{visibleTodayOrders}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider flex items-center gap-1 mb-1">
-                          <Package className="h-3 w-3" /> Total
-                        </span>
-                        <span className="font-bold text-lg leading-none">{visibleOrders.length}</span>
-                      </div>
+                {canViewThisUserStats && (
+                  <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider flex items-center gap-1 mb-1">
+                        <Activity className="h-3 w-3" /> Today
+                      </span>
+                      <span className="font-bold text-lg leading-none">{visibleTodayOrders}</span>
                     </div>
-                    {recentOrders.length > 0 && (
-                      <div className="space-y-1.5 pt-2 border-t">
-                        {recentOrders.map((order: any) => (
-                          <button
-                            key={`${order.id}-${order.createdAt}`}
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const match = allOrders.find(o => String(o.id) === String(order.id) && o.sheet_name === order.sheet);
-                              if (match) onOrderClick?.(match);
-                            }}
-                            className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-0.5 text-left text-xs hover:bg-accent"
-                          >
-                            <span className="truncate text-muted-foreground">@{order.insta}</span>
-                            <span className={`shrink-0 rounded-full border px-1.5 py-0.5 font-semibold ${profileMode === 'all' ? SOURCE_STYLES[order.source].badge : 'bg-muted text-muted-foreground border-border'}`}>{order.sheet}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider flex items-center gap-1 mb-1">
+                        <Package className="h-3 w-3" /> Total
+                      </span>
+                      <span className="font-bold text-lg leading-none">{visibleOrders.length}</span>
+                    </div>
+                  </div>
                 )}
               </div>
             );
@@ -162,6 +144,7 @@ export default function TeamView({ role, allOrders = [], currentUser, profileMod
         <UserProfileModal 
           userTarget={profileTarget} 
           allOrders={allOrders}
+          canViewOrders={canViewTeamStats || normalizeTeamUsername(profileTarget.username) === currentUserKey}
           profileMode={profileMode}
           onOrderClick={onOrderClick}
           onClose={() => setProfileTarget(null)} 

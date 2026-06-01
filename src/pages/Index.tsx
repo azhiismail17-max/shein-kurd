@@ -6,21 +6,21 @@ import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { broadcastOrderChange, subscribeOrderChanges } from '@/lib/realtime';
 import { toast } from 'sonner';
 import AppLayout from '@/components/app/AppLayout';
-import DashboardView from '@/components/app/DashboardView';
-import OrderFormView from '@/components/app/OrderFormView';
-import OrderListView from '@/components/app/OrderListView';
-import OrderDetailModal from '@/components/app/OrderDetailModal';
-import BatchesView from '@/components/app/BatchesView';
-import ExpensesView from '@/components/app/ExpensesView';
-import CalculatorView from '@/components/app/CalculatorView';
-import CalculatorModal from '@/components/app/CalculatorModal';
-import CameraSearchModal from '@/components/app/CameraSearchModal';
-import MessagesView from '@/components/app/MessagesView';
-import TeamView from '@/components/app/TeamView';
 import { LoginView } from '@/components/app/LoginView';
 import { SystemKey } from '@/components/app/SystemSwitcher';
 import { recordOrderDeleted } from '@/lib/teamActivity';
 import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
+
+const DashboardView = React.lazy(() => import('@/components/app/DashboardView'));
+const OrderFormView = React.lazy(() => import('@/components/app/OrderFormView'));
+const OrderListView = React.lazy(() => import('@/components/app/OrderListView'));
+const OrderDetailModal = React.lazy(() => import('@/components/app/OrderDetailModal'));
+const BatchesView = React.lazy(() => import('@/components/app/BatchesView'));
+const ExpensesView = React.lazy(() => import('@/components/app/ExpensesView'));
+const CalculatorView = React.lazy(() => import('@/components/app/CalculatorView'));
+const CameraSearchModal = React.lazy(() => import('@/components/app/CameraSearchModal'));
+const MessagesView = React.lazy(() => import('@/components/app/MessagesView'));
+const TeamView = React.lazy(() => import('@/components/app/TeamView'));
 
 const DEFAULT_YEAR = Object.keys(YEARS_CONFIG).sort().pop() || '2026';
 const DEFAULT_MONTH = ACTIVE_ORDER_SHEET;
@@ -38,6 +38,9 @@ const globalSort = (a: Order, b: Order) => {
   if (diff !== 0) return diff;
   return Number(b.id) - Number(a.id);
 };
+
+const getSearchFields = (o: Order) => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name];
+const buildSearchText = (o: Order) => getSearchFields(o).map(f => String(f || '').toLowerCase()).join(' ');
 
 const Index: React.FC = () => {
   const [role, setRole] = useState<string | null>(() => localStorage.getItem('auth_role'));
@@ -61,10 +64,7 @@ const Index: React.FC = () => {
     const saved = localStorage.getItem('app_activeYear');
     return saved && YEARS_CONFIG[saved] ? saved : DEFAULT_YEAR;
   });
-  const [activeMonth, setActiveMonth] = useState(() => {
-    const saved = localStorage.getItem('app_activeMonth');
-    return saved && ALL_MONTHS.includes(saved) ? saved : DEFAULT_MONTH;
-  });
+  const [activeMonth, setActiveMonth] = useState(DEFAULT_MONTH);
   const [viewingMonth, setViewingMonth] = useState(() => {
     const saved = localStorage.getItem('app_viewingMonth');
     return saved && ALL_MONTHS.includes(saved) ? saved : DEFAULT_MONTH;
@@ -97,7 +97,6 @@ const Index: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('app_searchQuery') || '');
   const [isSearchingAll, setIsSearchingAll] = useState(false);
-  const [showCalculator, setShowCalculator] = useState(false);
   const [showCameraSearch, setShowCameraSearch] = useState(false);
 
   useEffect(() => {
@@ -123,6 +122,7 @@ const Index: React.FC = () => {
 
   const loadedMonthsRef = useRef(loadedMonths);
   loadedMonthsRef.current = loadedMonths;
+  const historyLoadStartedRef = useRef(false);
 
   // Initialize correct tab based on role
   useEffect(() => {
@@ -243,8 +243,19 @@ const Index: React.FC = () => {
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
   useEffect(() => { if (viewingMonth && !loadedMonths.has(viewingMonth)) fetchMonthData(viewingMonth); }, [viewingMonth, loadedMonths, fetchMonthData]);
-  // Auto-load ALL months on startup so customer search has full data across all sheets
-  useEffect(() => { if (!loading && Object.keys(monthlyStats).length > 0) loadAllHistory(); }, [loading, monthlyStats, loadAllHistory]);
+  // Warm old months quietly after the current screen is usable.
+  useEffect(() => {
+    if (loading || historyLoadStartedRef.current || Object.keys(monthlyStats).length === 0) return;
+    historyLoadStartedRef.current = true;
+    const run = () => loadAllHistory();
+    const idleId = 'requestIdleCallback' in window
+      ? (window as any).requestIdleCallback(run, { timeout: 2500 })
+      : window.setTimeout(run, 1500);
+    return () => {
+      if (typeof idleId === 'number') window.clearTimeout(idleId);
+      else if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(idleId);
+    };
+  }, [loading, monthlyStats, loadAllHistory]);
 
   // Force refresh a specific month — clears cache and re-fetches immediately
   const forceRefreshMonth = useCallback(async (month: string) => {
@@ -262,6 +273,7 @@ const Index: React.FC = () => {
       if (jsonMain && jsonMain.status === 'success') {
         localStorage.setItem('app_initial_data', JSON.stringify(jsonMain));
         setMonthlyStats(jsonMain.meta.monthly_stats || {});
+        if (jsonMain.meta.active_sheet) setActiveMonth(jsonMain.meta.active_sheet);
         if (jsonMain.data?.length) {
           const sheet = jsonMain.data[0].sheet_name;
           setAllOrders(prev => mergeOrders(prev, jsonMain.data, sheet));
@@ -302,9 +314,11 @@ const Index: React.FC = () => {
         return;
       }
       refreshInFlightRef.current[target] = true;
+      let timeout: number | undefined;
       try {
         const ctrl = new AbortController();
         ((silentRefresh as any)._ctrls ||= {})[target] = ctrl;
+        timeout = window.setTimeout(() => ctrl.abort(), 7000);
         const res = await fetch(`${SCRIPT_URL}?month=${target}&skip_stats=true&t=${Date.now()}`, { credentials: 'omit', signal: ctrl.signal });
         const text = await res.text();
         let json: ApiResponse | null = null;
@@ -312,6 +326,7 @@ const Index: React.FC = () => {
         if (json && json.status === 'success') {
           localStorage.setItem(`app_month_data_${target}`, JSON.stringify(json));
           setMonthlyStats(prev => ({ ...prev, ...json.meta.monthly_stats }));
+          if (json.meta.active_sheet) setActiveMonth(json.meta.active_sheet);
           if (json.data?.length) {
             setAllOrders(prev => mergeOrders(prev, json.data, target));
             setLoadedMonths(prev => new Set(prev).add(target));
@@ -319,6 +334,7 @@ const Index: React.FC = () => {
         }
       } catch (_) { /* silent */ }
       finally {
+        if (timeout) window.clearTimeout(timeout);
         refreshInFlightRef.current[target] = false;
         if (refreshQueuedRef.current[target]) {
           refreshQueuedRef.current[target] = false;
@@ -470,7 +486,7 @@ const Index: React.FC = () => {
     if (!role) return;
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') silentRefresh();
-    }, 900);
+    }, 5000);
     return () => clearInterval(interval);
   }, [silentRefresh, role]);
 
@@ -507,51 +523,54 @@ const Index: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [silentRefresh, role]);
 
+  const sortedOrders = useMemo(() => [...allOrders].sort(globalSort), [allOrders]);
+  const searchEntries = useMemo(() => sortedOrders.map(order => {
+    const text = buildSearchText(order);
+    return { order, text, digits: text.replace(/\D/g, '').replace(/^0+/, '') };
+  }), [sortedOrders]);
+
   const filteredOrders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     let list: Order[];
-    if (q === 'pending') list = allOrders.filter(o => o.sheet_name === viewingMonth && getOrderStatus(o) === 'pending');
-    else if (q === 'pic') list = allOrders.filter(o => o.imageBase64 || o.image_url || o.primary_urls || o.warningBase64 || o.proof_urls?.length || o.secondaryImages?.length);
+    if (q === 'pending') list = sortedOrders.filter(o => o.sheet_name === viewingMonth && getOrderStatus(o) === 'pending');
+    else if (q === 'pic') list = sortedOrders.filter(o => o.imageBase64 || o.image_url || o.primary_urls || o.warningBase64 || o.proof_urls?.length || o.secondaryImages?.length);
     else if (q) {
       const qDigits = q.replace(/\D/g, '');
       const qStripped = qDigits.replace(/^0+/, '');
-      list = allOrders.filter(o => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name].some(f => {
-        const s = String(f || '').toLowerCase();
-        if (s.includes(q)) return true;
-        if (qStripped) {
-          const sDigits = s.replace(/\D/g, '').replace(/^0+/, '');
-          if (sDigits && sDigits.includes(qStripped)) return true;
-        }
-        return false;
-      }));
+      list = searchEntries
+        .filter(e => e.text.includes(q) || (qStripped && e.digits.includes(qStripped)))
+        .map(e => e.order);
     }
-    else list = allOrders.filter(o => o.sheet_name === viewingMonth);
-    return list.sort(globalSort);
-  }, [allOrders, viewingMonth, searchQuery]);
+    else list = sortedOrders.filter(o => o.sheet_name === viewingMonth);
+    return list;
+  }, [sortedOrders, searchEntries, viewingMonth, searchQuery]);
 
   const deliveryOrders = useMemo(() => {
-    const allArrived = allOrders.filter(o => getOrderStatus(o) === 'arrived' || String(o.note || '').includes('[DELIVERY_SCANNED]') || String(o.extra || '').includes('[DELIVERY_SCANNED]'));
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return allArrived.sort(globalSort);
+    const allArrived = sortedOrders.filter(o => getOrderStatus(o) === 'arrived' || String(o.note || '').includes('[DELIVERY_SCANNED]') || String(o.extra || '').includes('[DELIVERY_SCANNED]'));
+    if (!q) return allArrived;
     const qDigits = q.replace(/\D/g, '');
     const qStripped = qDigits.replace(/^0+/, '');
-    return allArrived.filter(o => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name].some(f => {
-      const s = String(f || '').toLowerCase();
-      if (s.includes(q)) return true;
-      if (qStripped) {
-        const sDigits = s.replace(/\D/g, '').replace(/^0+/, '');
-        if (sDigits && sDigits.includes(qStripped)) return true;
-      }
-      return false;
-    })).sort(globalSort);
-  }, [allOrders, searchQuery]);
+    return searchEntries
+      .filter(e =>
+        (getOrderStatus(e.order) === 'arrived' || String(e.order.note || '').includes('[DELIVERY_SCANNED]') || String(e.order.extra || '').includes('[DELIVERY_SCANNED]')) &&
+        (e.text.includes(q) || (qStripped && e.digits.includes(qStripped)))
+      )
+      .map(e => e.order);
+  }, [sortedOrders, searchEntries, searchQuery]);
 
-  const availableMonths = useMemo(() => (YEARS_CONFIG[activeYear] || []).filter(m => monthlyStats[m]?.count > 0), [activeYear, monthlyStats]);
+  const availableMonths = useMemo(() => {
+    return (YEARS_CONFIG[activeYear] || []).filter(m =>
+      m === activeMonth ||
+      m === ACTIVE_ORDER_SHEET ||
+      (monthlyStats[m]?.count || 0) > 0 ||
+      allOrders.some(o => o.sheet_name === m)
+    );
+  }, [activeYear, activeMonth, monthlyStats, allOrders]);
 
   useEffect(() => {
-    const yearMonths = YEARS_CONFIG[activeYear] || [];
-    if (yearMonths.length > 0 && !yearMonths.includes(viewingMonth)) {
-      setViewingMonth(availableMonths[0] || yearMonths[0]);
+    if (availableMonths.length > 0 && !availableMonths.includes(viewingMonth)) {
+      setViewingMonth(availableMonths[0]);
     }
   }, [activeYear, availableMonths, viewingMonth]);
 
@@ -628,33 +647,36 @@ const Index: React.FC = () => {
 
   return (
     <>
-      <AppLayout role={role} onLogout={handleLogout} onNotificationClick={handleNotificationClick} activeTab={activeTab} setActiveTab={setActiveTab} searchQuery={searchQuery} setSearchQuery={setSearchQuery} isSearchingAll={isSearchingAll} onSearchAll={() => setShowCalculator(true)} onCameraSearch={() => setShowCameraSearch(true)} viewingMonth={viewingMonth} setViewingMonth={setViewingMonth} activeYear={activeYear} setActiveYear={setActiveYear} availableMonths={availableMonths} currentSystem={currentSystem} onSystemChange={setCurrentSystem}>
-        {renderContent()}
+      <AppLayout role={role} onLogout={handleLogout} onNotificationClick={handleNotificationClick} activeTab={activeTab} setActiveTab={setActiveTab} searchQuery={searchQuery} setSearchQuery={setSearchQuery} isSearchingAll={isSearchingAll} onSearchAll={() => setActiveTab('calculator')} onCameraSearch={() => setShowCameraSearch(true)} viewingMonth={viewingMonth} setViewingMonth={setViewingMonth} activeYear={activeYear} setActiveYear={setActiveYear} availableMonths={availableMonths} currentSystem={currentSystem} onSystemChange={setCurrentSystem}>
+        <React.Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading...</div>}>
+          {renderContent()}
+        </React.Suspense>
       </AppLayout>
-      {selectedOrder && (
-        <OrderDetailModal 
-          order={selectedOrder} 
-          onClose={() => setSelectedOrder(null)} 
-          onEdit={o => { setEditingOrder(o); setSelectedOrder(null); setActiveTab('new-order'); }} 
-          onDelete={() => { 
-            setAllOrders(prev => prev.filter(o => {
-              const isMain = o.id === selectedOrder.id && o.sheet_name === selectedOrder.sheet_name;
-              const isLinked = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(`${o.id}:${o.sheet_name}`);
-              const isLinkedLegacy = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(o.id);
-              return !(isMain || isLinked || isLinkedLegacy);
-            })); 
-            setSelectedOrder(null); 
-            setTimeout(() => forceRefreshMonth(viewingMonth), 1000); 
-          }} 
-          allOrders={allOrders} 
-          onSuccess={(payload) => { setSelectedOrder(null); if(payload) handleFormSuccess(payload); else forceRefreshMonth(viewingMonth); }} 
-          onStatusChange={handleStatusChange} 
-          onUpdateOrder={handleUpdateOrder}
-        />
-      )}
-      {showCalculator && <CalculatorModal monthlyStats={monthlyStats} onClose={() => setShowCalculator(false)} />}
-      {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
-      <GlobalCalculatorButton />
+      <React.Suspense fallback={null}>
+        {selectedOrder && (
+          <OrderDetailModal 
+            order={selectedOrder} 
+            onClose={() => setSelectedOrder(null)} 
+            onEdit={o => { setEditingOrder(o); setSelectedOrder(null); setActiveTab('new-order'); }} 
+            onDelete={() => { 
+              setAllOrders(prev => prev.filter(o => {
+                const isMain = o.id === selectedOrder.id && o.sheet_name === selectedOrder.sheet_name;
+                const isLinked = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(`${o.id}:${o.sheet_name}`);
+                const isLinkedLegacy = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(o.id);
+                return !(isMain || isLinked || isLinkedLegacy);
+              })); 
+              setSelectedOrder(null); 
+              setTimeout(() => forceRefreshMonth(viewingMonth), 1000); 
+            }} 
+            allOrders={allOrders} 
+            onSuccess={(payload) => { setSelectedOrder(null); if(payload) handleFormSuccess(payload); else forceRefreshMonth(viewingMonth); }} 
+            onStatusChange={handleStatusChange} 
+            onUpdateOrder={handleUpdateOrder}
+          />
+        )}
+        {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
+      </React.Suspense>
+      <GlobalCalculatorButton onOpenPriceCalc={() => setActiveTab('calculator')} />
     </>
   );
 };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Palette } from 'lucide-react';
+import { Check, Moon, Palette, Sun } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +52,7 @@ interface ThemeColorPickerProps {
 
 export default function ThemeColorPicker({ compact = false }: ThemeColorPickerProps) {
   const [selectedKey, setSelectedKey] = useState(() => localStorage.getItem(STORAGE_KEY) || 'default');
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
   const selected = useMemo(() => COLORS.find(color => color.key === selectedKey) || COLORS[0], [selectedKey]);
 
   useEffect(() => {
@@ -62,6 +63,14 @@ export default function ThemeColorPicker({ compact = false }: ThemeColorPickerPr
     setSelectedKey(color.key);
     localStorage.setItem(STORAGE_KEY, color.key);
     applyThemeColor(color);
+  };
+
+  const toggleDarkMode = () => {
+    setIsDark(prev => {
+      const next = !prev;
+      document.documentElement.classList.toggle('dark', next);
+      return next;
+    });
   };
 
   return (
@@ -86,6 +95,18 @@ export default function ThemeColorPicker({ compact = false }: ThemeColorPickerPr
         <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
           Theme Color
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={toggleDarkMode}
+          className="flex items-center justify-between gap-3 py-2.5 cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <span className="h-5 w-5 rounded-full border border-border bg-secondary flex items-center justify-center">
+              {isDark ? <Sun size={13} /> : <Moon size={13} />}
+            </span>
+            <span className="text-sm font-medium">{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+          </div>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {COLORS.map(color => (
           <DropdownMenuItem

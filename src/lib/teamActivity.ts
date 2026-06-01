@@ -1,4 +1,4 @@
-import { arrayUnion, collection, doc, getDocs, increment, setDoc, updateDoc } from 'firebase/firestore';
+import { arrayUnion, collection, doc, getDoc, getDocs, increment, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export type TeamProfile = 'kurdistani' | 'iraqi';
@@ -41,8 +41,26 @@ export async function recordOrderCreated(profile: TeamProfile, username: string,
   const today = getTodayKey();
   const orderId = order.row_id || order.id || Date.now();
   const sheet = order.sheet || order.sheet_name || '';
+  const statsRef = doc(db, 'user_stats', getTeamStatsId(profile, cleanUsername));
+  const existing = await getDoc(statsRef);
+  const recentOrders = existing.exists() && Array.isArray((existing.data() as any).recentOrders)
+    ? (existing.data() as any).recentOrders
+    : [];
+  const alreadyTracked = recentOrders.some((item: any) => String(item.id) === String(orderId) && String(item.sheet || item.sheet_name || '') === String(sheet));
 
-  await setDoc(doc(db, 'user_stats', getTeamStatsId(profile, cleanUsername)), {
+  if (alreadyTracked) {
+    await setDoc(statsRef, {
+      username: cleanUsername,
+      role,
+      profile,
+      isOnline: true,
+      lastActive: new Date().toISOString(),
+      lastOrderAt: new Date().toISOString(),
+    }, { merge: true });
+    return;
+  }
+
+  await setDoc(statsRef, {
     username: cleanUsername,
     role,
     profile,
@@ -54,6 +72,7 @@ export async function recordOrderCreated(profile: TeamProfile, username: string,
     recentOrders: arrayUnion({
       id: String(orderId),
       sheet: String(sheet),
+      orderKey: `${profile}|${sheet}|${orderId}`,
       insta: String(order.insta || order.name || 'Unknown'),
       price: String(order.price || ''),
       createdAt: new Date().toISOString(),

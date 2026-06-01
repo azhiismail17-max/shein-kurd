@@ -36,7 +36,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   }).filter(Boolean));
 
   const revenue = orders.length > 0
-    ? orders.reduce((sum, order) => sum + getCustomerTotalPrice(order), 0)
+    ? orders.reduce((sum, order) => sum + getCustomerTotalPrice(order, orders), 0)
     : stats?.revenue || 0;
   const buy = stats?.buy || 0;
   const wgt = stats?.wgt || 0;

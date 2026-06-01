@@ -302,8 +302,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
       const linkedTotal = linkedOrders.reduce((sum, o) => sum + getDisplayPrice(o, allOrders), 0);
       const isAutoFree = (priceVal + linkedTotal) >= 118000;
       
-      const anotherOrderIsFree = linkedOrders.some(o => isOrderFree(o));
-      const shouldApplyFree = freeShipping || (isAutoFree && !anotherOrderIsFree);
+      const shouldApplyFree = freeShipping || isAutoFree;
 
       let cleanExtra = String(formData.extra || '').replace(/\bFree\b/i, '').trim();
       const extraWithFree = shouldApplyFree
@@ -438,8 +437,8 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
     return linkedIds.includes(key) || linkedIds.includes(o.id);
   });
 
-  const inputClass = "w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50";
-  const labelClass = "text-xs font-semibold text-muted-foreground uppercase tracking-wider";
+  const inputClass = "w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-base sm:text-sm font-medium focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50";
+  const labelClass = "text-[11px] sm:text-xs font-semibold text-muted-foreground uppercase tracking-wider";
 
   const renderField = (label: string, fieldName: string, type = 'text', placeholder = '', required = false) => (
     <div className="space-y-1.5">
@@ -487,15 +486,15 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-lg mx-auto bg-card p-6 rounded-xl border border-border animate-slide-up">
-      <div className="flex items-center justify-between mb-6">
+    <form onSubmit={handleSubmit} className="w-full max-w-md sm:max-w-lg mx-auto bg-card p-3 sm:p-6 rounded-lg sm:rounded-xl border border-border animate-slide-up">
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div>
           <h2 className="font-bold text-lg">{isEditing ? 'Edit Order' : 'New Order'}</h2>
           <p className="text-muted-foreground text-xs">Sheet: {activeSheet}</p>
         </div>
         <div className="flex items-center gap-2">
           {loyaltyCount > 0 && (
-            <div className="flex items-center gap-1.5 bg-primary/10 text-primary px-3 py-1.5 rounded-lg text-xs font-semibold">
+            <div className="flex items-center gap-1.5 bg-primary/10 text-primary px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold">
               <Sparkles size={14} /> {loyaltyCount} orders
             </div>
           )}
@@ -505,14 +504,14 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         </div>
       </div>
 
-      <div className="space-y-4" ref={suggestionContainerRef}>
+      <div className="space-y-3 sm:space-y-4" ref={suggestionContainerRef}>
         {/* Instagram with suggestions */}
         <div className="relative">
           {renderField('Instagram', 'insta', 'text', '@username', true)}
           {activeSuggestionField === 'insta' && <SuggestionsDropdown />}
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 min-[390px]:grid-cols-2 gap-3 sm:gap-4">
           <div className="relative">
             {renderField('Name', 'name', 'text', 'Customer name')}
             {activeSuggestionField === 'name' && <SuggestionsDropdown />}
@@ -524,11 +523,11 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         </div>
         
         {renderField('Link', 'link', 'text', 'Product URL')}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 min-[390px]:grid-cols-2 gap-3 sm:gap-4">
           {renderField('Price (IQD)', 'price', 'number', '0', true)}
           {renderField('Initial Payment', 'initial_payment', 'number', '0')}
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 min-[390px]:grid-cols-2 gap-3 sm:gap-4">
           {renderField('SKU Qty', 'pics_text', 'number', '1')}
           <div className="space-y-1.5">
             <label className={labelClass}>Region</label>
@@ -549,7 +548,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         {renderField('Phone 2', 'phone2', 'tel', 'Secondary phone')}
         {renderField('Notes / Box', 'note', 'text', 'Batch name, notes...')}
 
-        <div className="border border-border p-4 rounded-xl bg-secondary/10 mt-2">
+        <div className="border border-border p-3 sm:p-4 rounded-xl bg-secondary/10 mt-2">
           <h3 className="text-sm font-semibold mb-3 flex items-center justify-between">Primary Image <span className="text-xs text-muted-foreground font-normal">Optional</span></h3>
           <div className="grid grid-cols-3 gap-2">
             <input type="file" ref={fileRef} onChange={handleFileChange} accept="image/*" multiple className="hidden" />
@@ -577,13 +576,13 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
             {existingPrimaryUrls.length === 0 && previewPrimaryUrls.length === 0 && (
               <div onClick={() => fileRef.current?.click()} className="relative aspect-square rounded-lg border-2 border-dashed border-primary/40 flex flex-col justify-center items-center cursor-pointer hover:border-primary transition-all group bg-primary/5">
                  <Upload size={18} className="text-primary/70 group-hover:text-primary transition-colors mb-1" />
-                 <span className="text-[10px] font-bold text-primary/70 group-hover:text-primary leading-tight text-center px-1">Add Primary Image</span>
+                 <span className="text-[10px] font-bold text-primary/70 group-hover:text-primary leading-tight text-center px-1">Add Primary Images</span>
               </div>
             )}
           </div>
         </div>
 
-        <div className="border border-border p-4 rounded-xl bg-secondary/10 mt-2">
+        <div className="border border-border p-3 sm:p-4 rounded-xl bg-secondary/10 mt-2">
           <h3 className="text-sm font-semibold mb-3 flex items-center justify-between text-primary">Proof Picture <span className="text-[10px] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded uppercase font-bold">Required</span></h3>
           <div className="grid grid-cols-3 gap-2">
             <input type="file" ref={proofFileRef} onChange={handleProofFileChange} accept="image/*" multiple className="hidden" />
@@ -617,7 +616,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
 
         {/* Free Shipping Toggle */}
         {region && (
-          <div className="flex items-center justify-between bg-secondary/50 border border-border rounded-lg px-4 py-3">
+          <div className="flex items-center justify-between bg-secondary/50 border border-border rounded-lg px-3 sm:px-4 py-3 gap-3">
             <div>
               <p className="text-sm font-semibold">Free Shipping</p>
               <p className="text-xs text-muted-foreground">
@@ -657,7 +656,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
 
 
         {/* Checkout Summary */}
-        <div className="bg-secondary/30 border border-primary/20 p-4 rounded-xl space-y-2 mt-4">
+        <div className="bg-secondary/30 border border-primary/20 p-3 sm:p-4 rounded-xl space-y-2 mt-4">
           <h3 className="text-sm font-bold border-b border-border pb-2 mb-2">Cart Summary</h3>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Item Price</span>
@@ -715,7 +714,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
           </div>
         </div>
 
-        <div className="flex gap-3 pt-4 border-t border-border mt-4">
+        <div className="sticky -bottom-3 sm:static bg-card/95 backdrop-blur flex gap-2 sm:gap-3 pt-3 sm:pt-4 pb-1 sm:pb-0 border-t border-border mt-4">
           <button type="button" onClick={onCancel} disabled={isSubmitting} className="flex-1 bg-secondary hover:bg-secondary/80 text-foreground font-semibold py-3 rounded-lg transition-all disabled:opacity-50">Cancel</button>
           <button type="submit" disabled={isSubmitting || isUploadingImgs} className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 rounded-lg transition-all glow-primary disabled:opacity-50 flex items-center justify-center gap-2">
             {isSubmitting ? <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Saving...</> : isUploadingImgs ? <><div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> Uploading Imgs...</> : <><Sparkles size={16} /> {isEditing ? 'Update' : 'Submit'}</>}

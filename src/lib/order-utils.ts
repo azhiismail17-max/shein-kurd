@@ -164,6 +164,9 @@ export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
 
 export function getDisplayPrice(order: Order, allOrders?: Order[]): number {
   const rawPrice = parseFloat(String(order.price).replace(/[^0-9.-]+/g, '')) || 0;
+  if (isOrderFree(order)) {
+    return rawPrice + getRegionShipping(order.place);
+  }
   return rawPrice;
 }
 
@@ -177,8 +180,8 @@ export function getOrderShipping(order: Order): number {
   return getRegionShipping(order.place);
 }
 
-export function getCustomerTotalPrice(order: Order): number {
-  return getDisplayPrice(order) + getOrderShipping(order);
+export function getCustomerTotalPrice(order: Order, allOrders?: Order[]): number {
+  return isOrderFree(order) ? getDisplayPrice(order, allOrders) : getDisplayPrice(order, allOrders) + getOrderShipping(order);
 }
 
 export function getLinkedOrdersInfo(order: Order, allOrders: Order[]) {

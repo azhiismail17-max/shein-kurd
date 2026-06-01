@@ -60,7 +60,13 @@ export const YEARS_CONFIG: Record<string, string[]> = {
   '2026': ['Jun', 'July', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
 };
 
-export const ACTIVE_ORDER_SHEET = 'Jun';
+const ORDER_SHEETS_BY_MONTH = ['Jun', 'Jun', 'Jun', 'Jun', 'Jun', 'Jun', 'July', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function getCurrentOrderSheet(date = new Date()): string {
+  return ORDER_SHEETS_BY_MONTH[date.getMonth()] || 'Jun';
+}
+
+export const ACTIVE_ORDER_SHEET = getCurrentOrderSheet();
 
 export const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwYc-fXYeZv8iQd4zyMExvSHZ3lsVtPVSbgfkmn37s5sE-cnvGjufYvdXWJXTiu23Q/exec';
 

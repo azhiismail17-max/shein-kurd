@@ -57,11 +57,17 @@ export interface ApiResponse {
 }
 
 export const YEARS_CONFIG: Record<string, string[]> = {
-  '2025': ['April', 'May', 'Jun', 'July', 'Aug', 'Sept', 'Octo', 'Nove', 'Dece'],
-  '2026': ['Jan', 'Feb', 'March', 'Apr', 'Mayy'],
+  '2025': ['April', 'May', 'Juni', 'Julyi', 'Augi', 'Sept', 'Octo', 'Nove', 'Dece'],
+  '2026': ['Jan', 'Feb', 'March', 'Apr', 'Mayy', 'Jun', 'July', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
 };
 
-export const ACTIVE_ORDER_SHEET = 'Mayy';
+const ORDER_SHEETS_BY_MONTH = ['Jan', 'Feb', 'March', 'Apr', 'Mayy', 'Jun', 'July', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function getCurrentOrderSheet(date = new Date()): string {
+  return ORDER_SHEETS_BY_MONTH[date.getMonth()] || 'Jun';
+}
+
+export const ACTIVE_ORDER_SHEET = getCurrentOrderSheet();
 
 export const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwWF-1pFpNaIq9qx2BrMVU5qiEduvrgnOiejDmdc0e975LPmbfCSIqzGsg6dR5mWBM/exec';
 

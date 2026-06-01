@@ -10,7 +10,14 @@
 // - Linked Orders mapped logically in Column AB (28) (NO PHYSICAL MERGING)
 // - V: Primary Pic, W: Proof Pic, X: Proof URL, Y: Warning Pic, AA: Primary URL
 
-var ACTIVE_SHEET_NAME = "Jun"; // <--- CHANGE THIS MONTHLY[cite: 1]
+var ORDER_SHEETS_BY_MONTH = ["Jun", "Jun", "Jun", "Jun", "Jun", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function getActiveSheetName() {
+  var monthIndex = parseInt(Utilities.formatDate(new Date(), "Asia/Baghdad", "M"), 10) - 1;
+  return ORDER_SHEETS_BY_MONTH[monthIndex] || "Jun";
+}
+
+var ACTIVE_SHEET_NAME = getActiveSheetName(); // Automatically follows the current month
 
 // 2. LOCAL SHEETS
 var LOCAL_SHEETS = ["Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"]; //
@@ -244,6 +251,36 @@ function doPost(e) {
           for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 6).setValue(valueToWrite); } //
         } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 6).setValue(valueToWrite); } //
       }
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
+    }
+
+    if (data.action === "update_box_field_once") { //
+      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
+      var sheet = ss.getSheetByName(sheetName); //
+      if (sheet) { //
+        var colMap = { box_cost: 6, shipping_cost: 8, lost: 11, profit: 12 }; //
+        var targetCol = colMap[data.field]; //
+        var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []); //
+        if (targetCol && rowIds.length > 0) { //
+          var wroteValue = false; //
+          for (var i = 0; i < rowIds.length; i++) { //
+            var rowNum = parseInt(rowIds[i]); //
+            if (!isFinishedRow(sheet, rowNum)) { //
+              sheet.getRange(rowNum, targetCol).setValue(wroteValue ? "" : data.value); //
+              wroteValue = true; //
+            } //
+          } //
+        } //
+      } //
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
+    }
+
+    if (data.action === "update_price") { //
+      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
+      var sheet = ss.getSheetByName(sheetName); //
+      if (sheet && data.row_id && !isFinishedRow(sheet, data.row_id)) { //
+        sheet.getRange(parseInt(data.row_id), 5).setValue(data.value).setNumberFormat("#,##0"); //
+      } //
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
 
@@ -676,7 +713,23 @@ function handleOrder(data, sheetName) {
   } //
   var rawPrice = priceInput.toString().replace(/,/g, '').replace(/[^0-9.]/g, '').trim(); //
   var basePrice = parseFloat(rawPrice) || 0; //
-  if (basePrice >= 118000) { //
+  var linkedRowsForFree = [];
+  var linkedGroupTotal = basePrice;
+  if (data.linkedOrderIds && data.linkedOrderIds.length > 0) {
+    for (var lg = 0; lg < data.linkedOrderIds.length; lg++) {
+      var linkedFreeRow = parseInt(data.linkedOrderIds[lg].toString().split(":")[0]);
+      if (!isNaN(linkedFreeRow) && linkedFreeRow !== targetRow) {
+        linkedRowsForFree.push(linkedFreeRow);
+        var linkedPriceForTotal = parseFloat(sheet.getRange(linkedFreeRow, 5).getValue()) || 0;
+        var linkedExtraForTotal = sheet.getRange(linkedFreeRow, 19).getDisplayValue().toLowerCase();
+        if (linkedExtraForTotal.includes("free")) {
+          linkedPriceForTotal += getShippingForPlace(sheet.getRange(linkedFreeRow, 3).getDisplayValue());
+        }
+        linkedGroupTotal += linkedPriceForTotal;
+      }
+    }
+  }
+  if (linkedGroupTotal >= 118000) { //
     var currentExtra = (data.extra || "").toString().toLowerCase(); //
     if (!currentExtra.includes("free")) { data.extra = data.extra ? (data.extra + " - Free") : "Free"; //
     } //
@@ -712,7 +765,27 @@ function handleOrder(data, sheetName) {
   }
 
   var isFreeDelivery = (data.extra || "").toString().toLowerCase().includes("free"); //
-  var sheetItemPrice = basePrice; //
+  var freeShippingForSheet = 0;
+  if (isFreeDelivery && !isNoLocation) {
+    freeShippingForSheet = actualShipping;
+    for (var fs = 0; fs < linkedRowsForFree.length; fs++) {
+      var linkedRow = linkedRowsForFree[fs];
+      var linkedExtraCell = sheet.getRange(linkedRow, 19);
+      var linkedExtraValue = linkedExtraCell.getDisplayValue();
+      if (!linkedExtraValue.toLowerCase().includes("free")) {
+        var linkedShippingForSheet = getShippingForPlace(sheet.getRange(linkedRow, 3).getDisplayValue());
+        if (linkedShippingForSheet > 0) {
+          var linkedSheetPrice = parseFloat(sheet.getRange(linkedRow, 5).getValue()) || 0;
+          sheet.getRange(linkedRow, 5).setValue(linkedSheetPrice - linkedShippingForSheet).setNumberFormat("#,##0");
+        }
+        linkedExtraCell.setValue(linkedExtraValue ? linkedExtraValue + " - Free" : "Free");
+      }
+    }
+  }
+
+  var sheetItemPrice = isFreeDelivery && !isNoLocation
+    ? basePrice - Math.abs(freeShippingForSheet)
+    : basePrice; //
   
   if (!isUpdate && !isLinkedNewOrder && hasShippingDetails) { //
     var l1Cell = sheet.getRange("L1"); //
@@ -728,22 +801,6 @@ function handleOrder(data, sheetName) {
   } else { sheet.getRange(targetRow, 5).setValue(sheetItemPrice).setNumberFormat("#,##0"); //
   } //
 
-  if (isFreeDelivery && !isNoLocation) {
-    var freeShippingForSheet = actualShipping;
-    if (data.linkedOrderIds && data.linkedOrderIds.length > 0) {
-      for (var fs = 0; fs < data.linkedOrderIds.length; fs++) {
-        var linkedRow = parseInt(data.linkedOrderIds[fs].toString().split(":")[0]);
-        if (!isNaN(linkedRow) && linkedRow !== targetRow) {
-          freeShippingForSheet += getShippingForPlace(sheet.getRange(linkedRow, 3).getDisplayValue());
-        }
-      }
-    }
-    if (freeShippingForSheet > 0) sheet.getRange(targetRow, 8).setValue(-Math.abs(freeShippingForSheet)).setNumberFormat("#,##0");
-  } else {
-    var existingShippingValue = parseFloat(sheet.getRange(targetRow, 8).getValue()) || 0;
-    if (existingShippingValue < 0) sheet.getRange(targetRow, 8).clearContent();
-  }
-  
   sheet.getRange(targetRow, 7).setValue(data.pics_text || ''); //
   sheet.getRange(targetRow, 9).setValue(finalPhone); //
   if (data.box_name !== undefined) { sheet.getRange(targetRow, 10).setValue(data.box_name); //

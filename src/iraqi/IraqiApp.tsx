@@ -5,20 +5,20 @@ import { sendNotification } from '@/iraqi/lib/notifications';
 import { fetchWithRetry } from '@/iraqi/lib/fetchWithRetry';
 import { toast } from 'sonner';
 import AppLayout from '@/iraqi/components/app/AppLayout';
-import DashboardView from '@/iraqi/components/app/DashboardView';
-import OrderFormView from '@/iraqi/components/app/OrderFormView';
-import OrderListView from '@/iraqi/components/app/OrderListView';
-import OrderDetailModal from '@/iraqi/components/app/OrderDetailModal';
-import BatchesView from '@/iraqi/components/app/BatchesView';
-import ExpensesView from '@/iraqi/components/app/ExpensesView';
-import CalculatorView from '@/iraqi/components/app/CalculatorView';
-import CalculatorModal from '@/iraqi/components/app/CalculatorModal';
-import CameraSearchModal from '@/iraqi/components/app/CameraSearchModal';
-import MessagesView from '@/iraqi/components/app/MessagesView';
-import TeamView from '@/iraqi/components/app/TeamView';
 import { LoginView } from '@/iraqi/components/app/LoginView';
 import { recordOrderDeleted } from '@/lib/teamActivity';
 import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
+
+const DashboardView = React.lazy(() => import('@/iraqi/components/app/DashboardView'));
+const OrderFormView = React.lazy(() => import('@/iraqi/components/app/OrderFormView'));
+const OrderListView = React.lazy(() => import('@/iraqi/components/app/OrderListView'));
+const OrderDetailModal = React.lazy(() => import('@/iraqi/components/app/OrderDetailModal'));
+const BatchesView = React.lazy(() => import('@/iraqi/components/app/BatchesView'));
+const ExpensesView = React.lazy(() => import('@/iraqi/components/app/ExpensesView'));
+const CalculatorView = React.lazy(() => import('@/iraqi/components/app/CalculatorView'));
+const CameraSearchModal = React.lazy(() => import('@/iraqi/components/app/CameraSearchModal'));
+const MessagesView = React.lazy(() => import('@/iraqi/components/app/MessagesView'));
+const TeamView = React.lazy(() => import('@/iraqi/components/app/TeamView'));
 
 const DEFAULT_YEAR = Object.keys(YEARS_CONFIG).sort().pop() || '2026';
 const DEFAULT_MONTH = ACTIVE_ORDER_SHEET;
@@ -36,6 +36,9 @@ const globalSort = (a: Order, b: Order) => {
   if (diff !== 0) return diff;
   return Number(b.id) - Number(a.id);
 };
+
+const getSearchFields = (o: Order) => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name];
+const buildSearchText = (o: Order) => getSearchFields(o).map(f => String(f || '').toLowerCase()).join(' ');
 
 const Index: React.FC = () => {
   const [role, setRole] = useState<string | null>(() => localStorage.getItem('iraqi_auth_role'));
@@ -55,7 +58,7 @@ const Index: React.FC = () => {
     const saved = localStorage.getItem('iraqi_app_activeYear');
     return saved && YEARS_CONFIG[saved] ? saved : DEFAULT_YEAR;
   });
-  const [activeMonth, setActiveMonth] = useState(ACTIVE_ORDER_SHEET);
+  const [activeMonth, setActiveMonth] = useState(DEFAULT_MONTH);
   const [viewingMonth, setViewingMonth] = useState(() => {
     const saved = localStorage.getItem('iraqi_app_viewingMonth');
     return saved && ALL_MONTHS.includes(saved) ? saved : DEFAULT_MONTH;
@@ -70,7 +73,7 @@ const Index: React.FC = () => {
   }, [activeYear]);
 
   useEffect(() => {
-    localStorage.setItem('iraqi_app_activeMonth', ACTIVE_ORDER_SHEET);
+    localStorage.setItem('iraqi_app_activeMonth', activeMonth);
   }, [activeMonth]);
 
   useEffect(() => {
@@ -84,7 +87,6 @@ const Index: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('iraqi_app_searchQuery') || '');
   const [isSearchingAll, setIsSearchingAll] = useState(false);
-  const [showCalculator, setShowCalculator] = useState(false);
   const [showCameraSearch, setShowCameraSearch] = useState(false);
 
   useEffect(() => {
@@ -110,6 +112,7 @@ const Index: React.FC = () => {
 
   const loadedMonthsRef = useRef(loadedMonths);
   loadedMonthsRef.current = loadedMonths;
+  const historyLoadStartedRef = useRef(false);
 
   // Initialize correct tab based on role
   useEffect(() => {
@@ -131,11 +134,11 @@ const Index: React.FC = () => {
   const applyApiResponse = useCallback((json: ApiResponse, isBackground: boolean) => {
     if (json.status !== 'success') return;
     setMonthlyStats(json.meta.monthly_stats || {});
-    // We ignore json.meta.active_sheet and keep DEFAULT_MONTH
+    const scriptActiveSheet = json.meta.active_sheet || DEFAULT_MONTH;
+    setActiveMonth(scriptActiveSheet);
     if (!isBackground) {
       // Only set to default if we don't have a saved one
-      setActiveMonth(ACTIVE_ORDER_SHEET);
-      if (!localStorage.getItem('iraqi_app_viewingMonth') || !ALL_MONTHS.includes(localStorage.getItem('iraqi_app_viewingMonth') || '')) setViewingMonth(DEFAULT_MONTH);
+      if (!localStorage.getItem('iraqi_app_viewingMonth') || !ALL_MONTHS.includes(localStorage.getItem('iraqi_app_viewingMonth') || '')) setViewingMonth(scriptActiveSheet);
       if (!localStorage.getItem('iraqi_app_activeYear') || !YEARS_CONFIG[localStorage.getItem('iraqi_app_activeYear') || '']) setActiveYear(DEFAULT_YEAR);
     }
     if (json.data?.length) {
@@ -147,7 +150,17 @@ const Index: React.FC = () => {
 
   const fetchInitialData = useCallback(async () => {
     if (!role) return; // Don't fetch if not logged in
-    setLoading(true);
+    const cached = localStorage.getItem('iraqi_app_initial_data');
+    let hasCached = false;
+    if (cached) {
+      try {
+        const json: ApiResponse = JSON.parse(cached);
+        applyApiResponse(json, false);
+        hasCached = true;
+        setLoading(false);
+      } catch (e) { console.warn('Iraqi cache error', e); }
+    }
+    if (!hasCached) setLoading(true);
 
     try {
       const res = await fetchWithRetry(`${SCRIPT_URL}?t=${Date.now()}`);
@@ -159,7 +172,8 @@ const Index: React.FC = () => {
         console.warn("Invalid JSON:", text.substring(0, 50));
       }
       if (json && json.status === 'success') {
-        applyApiResponse(json, false);
+        localStorage.setItem('iraqi_app_initial_data', JSON.stringify(json));
+        applyApiResponse(json, hasCached);
       }
     } catch (err) { console.error('Fetch error', err); }
     finally { setLoading(false); }
@@ -168,7 +182,20 @@ const Index: React.FC = () => {
   const fetchMonthData = useCallback(async (month: string, force = false) => {
     if (!role) return;
     if (!force && loadedMonthsRef.current.has(month)) return;
-    if (allOrders.length === 0) setLoading(true);
+    const cacheKey = `iraqi_app_month_data_${month}`;
+    const cached = localStorage.getItem(cacheKey);
+    let hasCached = false;
+    if (cached) {
+      try {
+        const json: ApiResponse = JSON.parse(cached);
+        if (json.status === 'success') {
+          setAllOrders(prev => mergeOrders(prev, json.data, month));
+          setLoadedMonths(prev => new Set(prev).add(month));
+          hasCached = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    if (!hasCached && allOrders.length === 0) setLoading(true);
 
     try {
       const res = await fetchWithRetry(`${SCRIPT_URL}?month=${month}&t=${Date.now()}`);
@@ -176,6 +203,7 @@ const Index: React.FC = () => {
       let json: ApiResponse | null = null;
       try { json = JSON.parse(text); } catch (e) { console.warn("Invalid DB JSON"); }
       if (json && json.status === 'success') {
+        localStorage.setItem(cacheKey, JSON.stringify(json));
         setAllOrders(prev => mergeOrders(prev, json.data, month));
         setLoadedMonths(prev => new Set(prev).add(month));
       }
@@ -203,12 +231,25 @@ const Index: React.FC = () => {
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
   useEffect(() => { if (viewingMonth && !loadedMonths.has(viewingMonth)) fetchMonthData(viewingMonth); }, [viewingMonth, loadedMonths, fetchMonthData]);
-  // Auto-load ALL months on startup so customer search has full data across all sheets
-  useEffect(() => { if (!loading && Object.keys(monthlyStats).length > 0) loadAllHistory(); }, [loading, monthlyStats, loadAllHistory]);
+  // Warm old months quietly after the current screen is usable.
+  useEffect(() => {
+    if (loading || historyLoadStartedRef.current || Object.keys(monthlyStats).length === 0) return;
+    historyLoadStartedRef.current = true;
+    const run = () => loadAllHistory();
+    const idleId = 'requestIdleCallback' in window
+      ? (window as any).requestIdleCallback(run, { timeout: 2500 })
+      : window.setTimeout(run, 1500);
+    return () => {
+      if (typeof idleId === 'number') window.clearTimeout(idleId);
+      else if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(idleId);
+    };
+  }, [loading, monthlyStats, loadAllHistory]);
 
   // Force refresh a specific month — clears cache and re-fetches immediately
   const forceRefreshMonth = useCallback(async (month: string) => {
     if (!role) return;
+    localStorage.removeItem(`iraqi_app_month_data_${month}`);
+    localStorage.removeItem('iraqi_app_initial_data');
     try {
       // Fetch active sheet stats first
       const resMain = await fetchWithRetry(`${SCRIPT_URL}?t=${Date.now()}`);
@@ -217,7 +258,9 @@ const Index: React.FC = () => {
       try { jsonMain = JSON.parse(textMain); } catch (e) {}
       
       if (jsonMain && jsonMain.status === 'success') {
+        localStorage.setItem('iraqi_app_initial_data', JSON.stringify(jsonMain));
         setMonthlyStats(jsonMain.meta.monthly_stats || {});
+        if (jsonMain.meta.active_sheet) setActiveMonth(jsonMain.meta.active_sheet);
         if (jsonMain.data?.length) {
           const sheet = jsonMain.data[0].sheet_name;
           setAllOrders(prev => mergeOrders(prev, jsonMain.data, sheet));
@@ -232,6 +275,7 @@ const Index: React.FC = () => {
       try { jsonMonth = JSON.parse(textMonth); } catch (e) {}
 
       if (jsonMonth && jsonMonth.status === 'success') {
+        localStorage.setItem(`iraqi_app_month_data_${month}`, JSON.stringify(jsonMonth));
         setAllOrders(prev => mergeOrders(prev, jsonMonth.data, month));
         setLoadedMonths(prev => new Set(prev).add(month));
       }
@@ -257,15 +301,19 @@ const Index: React.FC = () => {
         return;
       }
       refreshInFlightRef.current[target] = true;
+      let timeout: number | undefined;
       try {
         const ctrl = new AbortController();
         ((silentRefresh as any)._ctrls ||= {})[target] = ctrl;
+        timeout = window.setTimeout(() => ctrl.abort(), 7000);
         const res = await fetch(`${SCRIPT_URL}?month=${target}&skip_stats=true&t=${Date.now()}`, { credentials: 'omit', signal: ctrl.signal });
         const text = await res.text();
         let json: ApiResponse | null = null;
         try { json = JSON.parse(text); } catch(e) {}
         if (json && json.status === 'success') {
+          localStorage.setItem(`iraqi_app_month_data_${target}`, JSON.stringify(json));
           setMonthlyStats(prev => ({ ...prev, ...json.meta.monthly_stats }));
+          if (json.meta.active_sheet) setActiveMonth(json.meta.active_sheet);
           if (json.data?.length) {
             setAllOrders(prev => mergeOrders(prev, json.data, target));
             setLoadedMonths(prev => new Set(prev).add(target));
@@ -273,6 +321,7 @@ const Index: React.FC = () => {
         }
       } catch (_) { /* silent */ }
       finally {
+        if (timeout) window.clearTimeout(timeout);
         refreshInFlightRef.current[target] = false;
         if (refreshQueuedRef.current[target]) {
           refreshQueuedRef.current[target] = false;
@@ -416,7 +465,7 @@ const Index: React.FC = () => {
     if (!role) return;
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') silentRefresh();
-    }, 900);
+    }, 5000);
     return () => clearInterval(interval);
   }, [silentRefresh, role]);
 
@@ -428,24 +477,56 @@ const Index: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [silentRefresh, role]);
 
+  const sortedOrders = useMemo(() => [...allOrders].sort(globalSort), [allOrders]);
+  const searchEntries = useMemo(() => sortedOrders.map(order => {
+    const text = buildSearchText(order);
+    return { order, text, digits: text.replace(/\D/g, '').replace(/^0+/, '') };
+  }), [sortedOrders]);
+
   const filteredOrders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     let list: Order[];
-    if (q === 'pending') list = allOrders.filter(o => o.sheet_name === viewingMonth && getOrderStatus(o) === 'pending');
-    else if (q === 'pic') list = allOrders.filter(o => o.imageBase64 || o.image_url || o.primary_urls || o.warningBase64 || o.proof_urls?.length || o.secondaryImages?.length);
-    else if (q) list = allOrders.filter(o => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name].some(f => String(f || '').toLowerCase().includes(q)));
-    else list = allOrders.filter(o => o.sheet_name === viewingMonth);
-    return list.sort(globalSort);
-  }, [allOrders, viewingMonth, searchQuery]);
+    if (q === 'pending') list = sortedOrders.filter(o => o.sheet_name === viewingMonth && getOrderStatus(o) === 'pending');
+    else if (q === 'pic') list = sortedOrders.filter(o => o.imageBase64 || o.image_url || o.primary_urls || o.warningBase64 || o.proof_urls?.length || o.secondaryImages?.length);
+    else if (q) {
+      const qDigits = q.replace(/\D/g, '');
+      const qStripped = qDigits.replace(/^0+/, '');
+      list = searchEntries
+        .filter(e => e.text.includes(q) || (qStripped && e.digits.includes(qStripped)))
+        .map(e => e.order);
+    }
+    else list = sortedOrders.filter(o => o.sheet_name === viewingMonth);
+    return list;
+  }, [sortedOrders, searchEntries, viewingMonth, searchQuery]);
 
   const deliveryOrders = useMemo(() => {
-    const allArrived = allOrders.filter(o => getOrderStatus(o) === 'arrived' || String(o.note || '').includes('[DELIVERY_SCANNED]') || String(o.extra || '').includes('[DELIVERY_SCANNED]'));
+    const allArrived = sortedOrders.filter(o => getOrderStatus(o) === 'arrived' || String(o.note || '').includes('[DELIVERY_SCANNED]') || String(o.extra || '').includes('[DELIVERY_SCANNED]'));
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return allArrived.sort(globalSort);
-    return allArrived.filter(o => [o.insta, o.name, o.phone, o.phone2, o.place, o.orderNo, o.extra, o.link, (o as any).sku, o.sheet_name].some(f => String(f || '').toLowerCase().includes(q))).sort(globalSort);
-  }, [allOrders, searchQuery]);
+    if (!q) return allArrived;
+    const qDigits = q.replace(/\D/g, '');
+    const qStripped = qDigits.replace(/^0+/, '');
+    return searchEntries
+      .filter(e =>
+        (getOrderStatus(e.order) === 'arrived' || String(e.order.note || '').includes('[DELIVERY_SCANNED]') || String(e.order.extra || '').includes('[DELIVERY_SCANNED]')) &&
+        (e.text.includes(q) || (qStripped && e.digits.includes(qStripped)))
+      )
+      .map(e => e.order);
+  }, [sortedOrders, searchEntries, searchQuery]);
 
-  const availableMonths = useMemo(() => (YEARS_CONFIG[activeYear] || []).filter(m => monthlyStats[m]?.count > 0), [activeYear, monthlyStats]);
+  const availableMonths = useMemo(() => {
+    return (YEARS_CONFIG[activeYear] || []).filter(m =>
+      m === activeMonth ||
+      m === ACTIVE_ORDER_SHEET ||
+      (monthlyStats[m]?.count || 0) > 0 ||
+      allOrders.some(o => o.sheet_name === m)
+    );
+  }, [activeYear, activeMonth, monthlyStats, allOrders]);
+
+  useEffect(() => {
+    if (availableMonths.length > 0 && !availableMonths.includes(viewingMonth)) {
+      setViewingMonth(availableMonths[0]);
+    }
+  }, [availableMonths, viewingMonth]);
 
   const handleUpdateOrder = useCallback((id: string | number, sheet: string, updates: Partial<Order>) => {
     const existing = allOrders.find(o => o.id === id && o.sheet_name === sheet);
@@ -520,33 +601,36 @@ const Index: React.FC = () => {
 
   return (
     <>
-      <AppLayout role={role} onLogout={handleLogout} onNotificationClick={handleNotificationClick} activeTab={activeTab} setActiveTab={setActiveTab} searchQuery={searchQuery} setSearchQuery={setSearchQuery} isSearchingAll={isSearchingAll} onSearchAll={() => setShowCalculator(true)} onCameraSearch={() => setShowCameraSearch(true)} viewingMonth={viewingMonth} setViewingMonth={setViewingMonth} activeYear={activeYear} setActiveYear={setActiveYear} availableMonths={availableMonths}>
-        {renderContent()}
+      <AppLayout role={role} onLogout={handleLogout} onNotificationClick={handleNotificationClick} activeTab={activeTab} setActiveTab={setActiveTab} searchQuery={searchQuery} setSearchQuery={setSearchQuery} isSearchingAll={isSearchingAll} onSearchAll={() => setActiveTab('calculator')} onCameraSearch={() => setShowCameraSearch(true)} viewingMonth={viewingMonth} setViewingMonth={setViewingMonth} activeYear={activeYear} setActiveYear={setActiveYear} availableMonths={availableMonths}>
+        <React.Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading...</div>}>
+          {renderContent()}
+        </React.Suspense>
       </AppLayout>
-      {selectedOrder && (
-        <OrderDetailModal 
-          order={selectedOrder} 
-          onClose={() => setSelectedOrder(null)} 
-          onEdit={o => { setEditingOrder(o); setSelectedOrder(null); setActiveTab('new-order'); }} 
-          onDelete={() => { 
-            setAllOrders(prev => prev.filter(o => {
-              const isMain = o.id === selectedOrder.id && o.sheet_name === selectedOrder.sheet_name;
-              const isLinked = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(`${o.id}:${o.sheet_name}`);
-              const isLinkedLegacy = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(o.id);
-              return !(isMain || isLinked || isLinkedLegacy);
-            })); 
-            setSelectedOrder(null); 
-            setTimeout(() => forceRefreshMonth(viewingMonth), 1000); 
-          }} 
-          allOrders={allOrders} 
-          onSuccess={(payload) => { setSelectedOrder(null); if(payload) handleFormSuccess(payload); else forceRefreshMonth(viewingMonth); }} 
-          onStatusChange={handleStatusChange} 
-          onUpdateOrder={handleUpdateOrder}
-        />
-      )}
-      {showCalculator && <CalculatorModal monthlyStats={monthlyStats} onClose={() => setShowCalculator(false)} />}
-      {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
-      <GlobalCalculatorButton />
+      <React.Suspense fallback={null}>
+        {selectedOrder && (
+          <OrderDetailModal 
+            order={selectedOrder} 
+            onClose={() => setSelectedOrder(null)} 
+            onEdit={o => { setEditingOrder(o); setSelectedOrder(null); setActiveTab('new-order'); }} 
+            onDelete={() => { 
+              setAllOrders(prev => prev.filter(o => {
+                const isMain = o.id === selectedOrder.id && o.sheet_name === selectedOrder.sheet_name;
+                const isLinked = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(`${o.id}:${o.sheet_name}`);
+                const isLinkedLegacy = selectedOrder.linkedOrderIds && selectedOrder.linkedOrderIds.includes(o.id);
+                return !(isMain || isLinked || isLinkedLegacy);
+              })); 
+              setSelectedOrder(null); 
+              setTimeout(() => forceRefreshMonth(viewingMonth), 1000); 
+            }} 
+            allOrders={allOrders} 
+            onSuccess={(payload) => { setSelectedOrder(null); if(payload) handleFormSuccess(payload); else forceRefreshMonth(viewingMonth); }} 
+            onStatusChange={handleStatusChange} 
+            onUpdateOrder={handleUpdateOrder}
+          />
+        )}
+        {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
+      </React.Suspense>
+      <GlobalCalculatorButton onOpenPriceCalc={() => setActiveTab('calculator')} />
     </>
   );
 };

@@ -39,6 +39,18 @@ export function parseOrderPrice(value: unknown) {
   return parseFloat(String(value || '').replace(/[^0-9.-]+/g, '')) || 0;
 }
 
+function dedupeRecentOrders(orders: CombinedRecentOrder[]) {
+  const byKey = new Map<string, CombinedRecentOrder>();
+  for (const order of orders) {
+    const key = `${order.source}|${order.sheet}|${order.id}`;
+    const existing = byKey.get(key);
+    if (!existing || new Date(order.createdAt || 0).getTime() > new Date(existing.createdAt || 0).getTime()) {
+      byKey.set(key, order);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+}
+
 export function getCombinedUserStats(stats: Record<string, any>, username: string) {
   return getUserStatsForProfile(stats, username, 'all');
 }
@@ -49,7 +61,7 @@ export function getUserStatsForProfile(stats: Record<string, any>, username: str
   const sources = profile === 'all' ? PROFILE_SOURCES : [profile];
   const bySource = sources.map((source) => {
     const sourceStats = stats[getTeamStatsId(source, cleanUsername)] || {};
-    const recentOrders: CombinedRecentOrder[] = Array.isArray(sourceStats.recentOrders)
+    const recentOrders = dedupeRecentOrders(Array.isArray(sourceStats.recentOrders)
       ? sourceStats.recentOrders.map((order: any) => ({
           id: String(order.id || ''),
           sheet: String(order.sheet || order.sheet_name || ''),
@@ -58,21 +70,20 @@ export function getUserStatsForProfile(stats: Record<string, any>, username: str
           createdAt: String(order.createdAt || ''),
           source,
         }))
-      : [];
+      : []);
+    const todayOrders = recentOrders.filter((order) => order.createdAt && new Date(order.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' }) === today).length;
 
     return {
       source,
-      totalOrders: Number(sourceStats.totalOrders || 0),
-      todayOrders: Number(sourceStats.dailyOrders?.[today] || 0),
+      totalOrders: recentOrders.length,
+      todayOrders,
       isOnline: sourceStats.isOnline === true && sourceStats.lastActive && Date.now() - new Date(sourceStats.lastActive).getTime() < 90000,
       isActiveToday: sourceStats.lastActive ? new Date(sourceStats.lastActive).toDateString() === new Date().toDateString() : false,
       recentOrders,
     };
   });
 
-  const recentOrders = bySource
-    .flatMap((entry) => entry.recentOrders)
-    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const recentOrders = dedupeRecentOrders(bySource.flatMap((entry) => entry.recentOrders));
 
   return {
     totalOrders: bySource.reduce((sum, entry) => sum + entry.totalOrders, 0),

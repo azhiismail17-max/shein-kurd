@@ -4,9 +4,10 @@ import { Order, getOrderStatus } from '@/types';
  * Finds the appropriate box name for a new order.
  * - Looks for the latest open box that has < 90 pieces
  * - If latest box has 90-110 pieces, creates a new box
- * - If no boxes exist, starts at Box 1
+ * - Kurdistani 2026 boxes start at Box 73
  */
 export function findAutoBoxName(orders: Order[], newPieces: number): string {
+  const minBoxNum = 73;
   // Find all existing box numbers and track which boxes are "closed"
   // (a box is closed once any order inside it is marked approved/arrived/cancelled —
   //  i.e. no longer pending — so we never add new orders to an already-approved box).
@@ -26,10 +27,10 @@ export function findAutoBoxName(orders: Order[], newPieces: number): string {
   });
 
   if (boxMap.size === 0) {
-    return 'Box 1';
+    return `Box ${minBoxNum}`;
   }
 
-  const maxBoxNum = Math.max(...boxMap.keys());
+  const maxBoxNum = Math.max(minBoxNum - 1, ...boxMap.keys());
   const currentBoxPieces = boxMap.get(maxBoxNum) || 0;
 
   // If the latest box is closed (any order in it is approved/arrived/cancelled),

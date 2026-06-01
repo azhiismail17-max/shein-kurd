@@ -12,11 +12,12 @@ interface UserProfileModalProps {
   onMessage: () => void;
   allOrders: Order[];
   canDelete?: boolean;
+  canViewOrders?: boolean;
   profileMode?: 'all' | 'kurdistani' | 'iraqi';
   onOrderClick?: (order: Order) => void;
 }
 
-export default function UserProfileModal({ userTarget, onClose, onMessage, allOrders, canDelete, profileMode = 'kurdistani', onOrderClick }: UserProfileModalProps) {
+export default function UserProfileModal({ userTarget, onClose, onMessage, allOrders, canDelete, canViewOrders = true, profileMode = 'kurdistani', onOrderClick }: UserProfileModalProps) {
   const [stats, setStats] = useState({
     totalOrders: 0,
     todayOrders: 0,
@@ -49,7 +50,9 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
   }, [userTarget.username, profileMode]);
 
   const { isActiveToday, isOnline, bySource } = stats;
-  const recentOrders = stats.recentOrders.filter((order) => allOrders.some(o => String(o.id) === String(order.id) && o.sheet_name === order.sheet));
+  const recentOrders = canViewOrders
+    ? stats.recentOrders.filter((order) => allOrders.some(o => String(o.id) === String(order.id) && o.sheet_name === order.sheet))
+    : [];
   const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' });
   const totalOrders = recentOrders.length;
   const todayOrders = recentOrders.filter((order) => order.createdAt && new Date(order.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' }) === todayKey).length;
@@ -100,7 +103,7 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
             </p>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
+          {canViewOrders && <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
             <div className="bg-muted/50 p-3 rounded-xl border border-border/50">
               <div className="text-sm text-muted-foreground flex items-center gap-1.5 mb-1">
                 <Package className="h-4 w-4" /> Total Orders
@@ -121,9 +124,9 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
               </div>
               <div className="text-2xl font-bold">{totalValue.toLocaleString()} IQD</div>
             </div>
-          </div>
+          </div>}
 
-          {profileMode === 'all' && <div className="grid grid-cols-2 gap-3 mt-3">
+          {canViewOrders && profileMode === 'all' && <div className="grid grid-cols-2 gap-3 mt-3">
             {bySource.map((entry) => (
               <div key={entry.source} className={`rounded-xl border p-3 ${SOURCE_STYLES[entry.source].badge}`}>
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
@@ -135,7 +138,7 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
             ))}
           </div>}
 
-          <div className="mt-6">
+          {canViewOrders && <div className="mt-6">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h4 className="font-semibold flex items-center gap-2">
                 <Package className="h-4 w-4" /> {profileMode === 'all' ? 'Combined Orders' : 'Orders'}
@@ -159,15 +162,15 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
                         onOrderClick?.(match);
                       }
                     }}
-                    className={`w-full border rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent ${profileMode === 'all' ? `border-l-4 ${SOURCE_STYLES[order.source].row}` : 'bg-card'}`}
+                    className={`w-full border rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent ${profileMode === 'all' ? `border-l-4 ${SOURCE_STYLES[order.source].row}` : 'bg-card'}`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold truncate">@{order.insta}</div>
+                        <div className="text-sm font-semibold truncate">@{order.insta}</div>
                         <div className="text-xs text-muted-foreground truncate">#{order.id} &middot; {order.sheet}</div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="font-bold">{parseOrderPrice(order.price).toLocaleString()} IQD</div>
+                        <div className="text-sm font-bold">{parseOrderPrice(order.price).toLocaleString()} IQD</div>
                         {profileMode === 'all' && (
                           <div className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${SOURCE_STYLES[order.source].badge}`}>
                             {SOURCE_STYLES[order.source].label}
@@ -179,7 +182,7 @@ export default function UserProfileModal({ userTarget, onClose, onMessage, allOr
                 ))
               )}
             </div>
-          </div>
+          </div>}
           
           <div className="mt-6 flex space-x-3">
             <Button className="flex-1 rounded-xl" onClick={onMessage}>
