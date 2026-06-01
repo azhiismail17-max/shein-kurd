@@ -2,7 +2,7 @@ import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import { Order, SCRIPT_URL, YEARS_CONFIG, getOrderStatus, STATUS_COLORS, getVerifiedSet, saveVerifiedSet, getMissingSet, saveMissingSet } from '@/types';
 import { Package, Copy, Check, X, Download, Search, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck, Heart, Plus, PackagePlus, Edit2, Pencil, Link2, ExternalLink, ImageIcon, Calendar, CheckCircle2 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
-import { getLinkedOrdersInfo, getDisplayPrice, getLinkedGroup } from '@/lib/order-utils';
+import { getLinkedOrdersInfo, getDisplayPrice, getLinkedGroup, getSheetPriceForSave, isOrderFree } from '@/lib/order-utils';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { sendNotification } from '@/lib/notifications';
 import { SkuSearch } from './SkuSearch';
@@ -348,12 +348,13 @@ const BatchesView: React.FC<Props & { role?: string }> = ({ orders, allOrders, o
   const handleSaveOrderPrice = useCallback(async (order: Order) => {
     if (order.is_finished) return;
     const newPrice = Number(priceInput.replace(/[^0-9.-]+/g, '')) || 0;
+    const sheetPrice = getSheetPriceForSave(newPrice, order.place, isOrderFree(order), order.shipping_cost);
     setIsSyncing(true);
     try {
-      order.price = newPrice; // Optimistic
+      order.price = sheetPrice; // Optimistic
       await fetchWithRetry(SCRIPT_URL, {
         method: 'POST',
-        body: JSON.stringify({ action: 'update_price', sheet: order.sheet_name, row_id: order.id, value: newPrice || '' })
+        body: JSON.stringify({ action: 'update_price', sheet: order.sheet_name, row_id: order.id, value: sheetPrice || '' })
       });
       onRefresh();
     } catch (e) { console.error(e); }

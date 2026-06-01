@@ -1,3 +1,5 @@
+const REQUEST_TIMEOUT_MS = 30000;
+
 export async function fetchWithRetry(url: string | URL | Request, options?: RequestInit, maxRetries = 2): Promise<Response> {
   const fetchOptions: RequestInit = {
     ...options,
@@ -9,7 +11,7 @@ export async function fetchWithRetry(url: string | URL | Request, options?: Requ
   let attempt = 0;
   while (attempt < maxRetries) {
     const ctrl = !fetchOptions.signal ? new AbortController() : null;
-    const timeout = ctrl ? window.setTimeout(() => ctrl.abort(), 8000) : null;
+    const timeout = ctrl ? window.setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS) : null;
     try {
       const response = await fetch(url, ctrl ? { ...fetchOptions, signal: ctrl.signal } : fetchOptions);
       if (!response.ok) {

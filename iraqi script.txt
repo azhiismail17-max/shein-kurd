@@ -10,14 +10,7 @@
 // - Linked Orders mapped logically in Column AB (28) (NO PHYSICAL MERGING)
 // - V: Primary Pic, W: Proof Pic, X: Proof URL, Y: Warning Pic, AA: Primary URL
 
-var ORDER_SHEETS_BY_MONTH = ["Jun", "Jun", "Jun", "Jun", "Jun", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function getActiveSheetName() {
-  var monthIndex = parseInt(Utilities.formatDate(new Date(), "Asia/Baghdad", "M"), 10) - 1;
-  return ORDER_SHEETS_BY_MONTH[monthIndex] || "Jun";
-}
-
-var ACTIVE_SHEET_NAME = getActiveSheetName(); // Automatically follows the current month
+var ACTIVE_SHEET_NAME = "Jun"; // <--- CHANGE THIS MONTHLY[cite: 1]
 
 // 2. LOCAL SHEETS
 var LOCAL_SHEETS = ["Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"]; //
@@ -33,29 +26,13 @@ var STATUS_COLOR_MAP = {
   "mismatch": null,
   "missing": "#fed7aa"
 }; //
-var FINISHED_BOX_COLOR = "#ffedd5"; //
 
 function applyStatusColor(sheet, rowId, statusKey) {
   if (!sheet) { return; } //
-  if (isFinishedRow(sheet, rowId)) { return; } //
   var color = STATUS_COLOR_MAP[statusKey] || null; //
   var cols = ['A', 'B', 'C', 'E', 'G', 'I']; //
   var ranges = cols.map(function(c) { return c + rowId; }); //
   try { sheet.getRangeList(ranges).setBackground(color); } catch (e) {} //
-}
-
-function isFinishedRow(sheet, rowId) {
-  try {
-    return sheet && parseInt(rowId) >= 4 && sheet.getRange(parseInt(rowId), 1).getBackground().toLowerCase() === FINISHED_BOX_COLOR;
-  } catch(e) { return false; }
-}
-
-function lockedResponse(rowId) {
-  return ContentService.createTextOutput(JSON.stringify({
-    status: "locked",
-    result: "locked",
-    message: "Row " + rowId + " is finished and can only be changed manually in the sheet."
-  })).setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
@@ -78,50 +55,35 @@ function doPost(e) {
       
       if (!authSheet) { //
         authSheet = ss.insertSheet("Auth"); //
-        authSheet.getRange("C3:D9").setValues([
-          ["iraqi_owner", "ownerpass123"],
-          ["iraqi_admin", "adminpass123"],
-          ["iraqi_mod_1", "modpass123"],
-          ["iraqi_mod_2", "modpass123"],
-          ["iraqi_mod_3", "modpass123"],
-          ["iraqi_mod_4", "modpass123"],
-          ["iraqi_delivery", "deliverypass123"]
+        authSheet.getRange("A1:C3").setValues([
+          ["owner", "ownerpass123", "Owner"],
+          ["admin", "adminpass123", "Admin"],
+          ["mod", "modpass123", "Moderator"]
         ]); //
         return ContentService.createTextOutput(JSON.stringify({
           status: "error", 
-          message: "Auth sheet missing. Auto-created. Put Iraqi users in C/D rows 3-9."
+          message: "Auth sheet missing. Auto-created. Update Usernames in Col A, Passwords in B."
         })).setMimeType(ContentService.MimeType.JSON); //
       } //
       
+      var ownerUser = authSheet.getRange("A1").getValue().toString().trim(); //
+      var ownerPass = authSheet.getRange("B1").getValue().toString().trim(); //
+      var adminUser = authSheet.getRange("A2").getValue().toString().trim();
+      var adminPass = authSheet.getRange("B2").getValue().toString().trim();
+      var modUser   = authSheet.getRange("C3").getValue().toString().trim(); //
+      var modPass   = authSheet.getRange("D3").getValue().toString().trim(); //
       var inputUser = (data.username || "").toString().trim(); //
       var inputPass = (data.password || "").toString().trim(); //
 
-      var rolesByRow = {
-        3: { role: "owner", permissions: ["all"], message: "Welcome Owner" },
-        4: { role: "admin", permissions: ["new_order", "order", "box"], message: "Welcome Admin" },
-        5: { role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" },
-        6: { role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" },
-        7: { role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" },
-        8: { role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" },
-        9: { role: "delivery", permissions: ["delivery", "order"], message: "Welcome Delivery" }
-      };
-
-      for (var row = 3; row <= 9; row++) {
-        var authUser = authSheet.getRange(row, 3).getValue().toString().trim();
-        var authPass = authSheet.getRange(row, 4).getValue().toString().trim();
-        if (authUser && inputUser === authUser && inputPass === authPass) {
-          var auth = rolesByRow[row];
-          return ContentService.createTextOutput(JSON.stringify({
-            status: "success",
-            role: auth.role,
-            permissions: auth.permissions,
-            system: "iraqi",
-            message: auth.message
-          })).setMimeType(ContentService.MimeType.JSON); //
-        }
+      if (inputUser === ownerUser && inputPass === ownerPass) { //
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "owner", permissions: ["all"], message: "Welcome Owner" })).setMimeType(ContentService.MimeType.JSON); //
+      } else if (inputUser === adminUser && inputPass === adminPass) { //
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "admin", permissions: ["new_order", "order", "box"], message: "Welcome Admin" })).setMimeType(ContentService.MimeType.JSON); //
+      } else if (inputUser === modUser && inputPass === modPass) { //
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" })).setMimeType(ContentService.MimeType.JSON); //
+      } else { //
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid username or password" })).setMimeType(ContentService.MimeType.JSON); //
       } //
-
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid username or password" })).setMimeType(ContentService.MimeType.JSON); //
     }
 
     var sheetName = data.sheet || data.sheet_name || ACTIVE_SHEET_NAME; //
@@ -196,7 +158,6 @@ function doPost(e) {
        var ss = SpreadsheetApp.getActiveSpreadsheet(); //
        var sheet = ss.getSheetByName(sheetName); //
        if (sheet) { //
-           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
            if (data.image_url) { //
                sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); //
                // W (23)
@@ -216,7 +177,6 @@ function doPost(e) {
        var ss = SpreadsheetApp.getActiveSpreadsheet(); //
        var sheet = ss.getSheetByName(sheetName); //
        if (sheet) { //
-           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
            if (data.image_url) { //
                sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + data.image_url + '")'); //
                // Y (25)
@@ -232,7 +192,6 @@ function doPost(e) {
        var ss = SpreadsheetApp.getActiveSpreadsheet(); //
        var sheet = ss.getSheetByName(sheetName); //
        if (sheet) { //
-           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
            sheet.getRange(parseInt(data.row_id), 22).setFormula('=IMAGE("' + data.primary_urls.split(",")[0] + '")'); //
            // V (22)
            sheet.getRange(parseInt(data.row_id), 27).setValue(data.primary_urls); //
@@ -248,39 +207,20 @@ function doPost(e) {
         var valueToWrite = data.value !== undefined ? //
         data.value : data.box_cost; //
         if (data.row_ids && Array.isArray(data.row_ids)) { //
-          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 6).setValue(valueToWrite); } //
-        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 6).setValue(valueToWrite); } //
+          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 6).setValue(valueToWrite); //
+        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 6).setValue(valueToWrite); } //
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
 
-    if (data.action === "update_box_field_once") { //
+    if (data.action === "update_shipping") { //
       var ss = SpreadsheetApp.getActiveSpreadsheet(); //
       var sheet = ss.getSheetByName(sheetName); //
       if (sheet) { //
-        var colMap = { box_cost: 6, shipping_cost: 8, lost: 11, profit: 12 }; //
-        var targetCol = colMap[data.field]; //
-        var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []); //
-        if (targetCol && rowIds.length > 0) { //
-          var wroteValue = false; //
-          for (var i = 0; i < rowIds.length; i++) { //
-            var rowNum = parseInt(rowIds[i]); //
-            if (!isFinishedRow(sheet, rowNum)) { //
-              sheet.getRange(rowNum, targetCol).setValue(wroteValue ? "" : data.value); //
-              wroteValue = true; //
-            } //
-          } //
-        } //
-      } //
-      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
-    }
-
-    if (data.action === "update_price") { //
-      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
-      var sheet = ss.getSheetByName(sheetName); //
-      if (sheet && data.row_id && !isFinishedRow(sheet, data.row_id)) { //
-        sheet.getRange(parseInt(data.row_id), 5).setValue(data.value).setNumberFormat("#,##0"); //
-      } //
+        if (data.row_ids && Array.isArray(data.row_ids)) { //
+          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 8).setValue(data.value); //
+        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 8).setValue(data.value); } //
+      }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
 
@@ -289,30 +229,13 @@ function doPost(e) {
       var sheet = ss.getSheetByName(sheetName); //
       if (sheet) { //
         if (data.row_ids && Array.isArray(data.row_ids)) { //
-          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 10).setValue(data.box_name); } //
-        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 10).setValue(data.box_name); } //
+          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 10).setValue(data.box_name); //
+        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 10).setValue(data.box_name); } //
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
 
-    if (data.action === "mark_box_finished") { //
-      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
-      var sheet = ss.getSheetByName(sheetName); //
-      if (sheet) { //
-        var color = data.finished === false || data.finished === "false" ? null : FINISHED_BOX_COLOR; //
-        var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []); //
-        for (var i = 0; i < rowIds.length; i++) { //
-          var r = parseInt(rowIds[i]); //
-          if (r >= 4) sheet.getRange(r, 1, 1, 19).setBackground(color); //
-        } //
-      } //
-      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
-    }
-
     if (data.action === "delete" && data.row_id) { //
-       var ssDel = SpreadsheetApp.getActiveSpreadsheet(); //
-       var sheetDel = ssDel.getSheetByName(sheetName); //
-       if (sheetDel && isFinishedRow(sheetDel, data.row_id)) return lockedResponse(data.row_id); //
        var result = deleteOrder(data.row_id, sheetName, data.linkedOrderIds); //
        return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON); //
     }
@@ -330,7 +253,6 @@ function doPost(e) {
     if (data.action === "verifyOrder" && data.row_id) { //
       var ss = SpreadsheetApp.getActiveSpreadsheet(); //
       var sheet = ss.getSheetByName(sheetName); //
-      if (sheet && isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
       if (sheet) applyStatusColor(sheet, parseInt(data.row_id), data.matchStatus); //
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
@@ -339,7 +261,6 @@ function doPost(e) {
       var ss = SpreadsheetApp.getActiveSpreadsheet(); //
       var sheet = ss.getSheetByName(sheetName); //
       if (sheet) { //
-        if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
         applyStatusColor(sheet, parseInt(data.row_id), data.missing === true || data.missing === "true" ? "missing" : null); //
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
@@ -376,7 +297,6 @@ function doPost(e) {
             if (foundRow !== -1) break; //
           } //
           if (foundRow !== -1) { //
-            if (isFinishedRow(activeSheet, foundRow)) return lockedResponse(foundRow); //
             activeSheet.getRangeList(['A' + foundRow, 'B' + foundRow, 'C' + foundRow, 'E' + foundRow, 'G' + foundRow, 'I' + foundRow]).setBackground(statusColor); //
             if (statusColor === "#fee2e2") { //
               var priceVal = activeSheet.getRange(foundRow, 5).getValue() || 0; //
@@ -401,7 +321,6 @@ function doPost(e) {
         var ss = SpreadsheetApp.getActiveSpreadsheet(); //
         var sheet = ss.getSheetByName(sheetName); //
         if (sheet) { //
-          if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id); //
           applyStatusColor(sheet, parseInt(data.row_id), data.status_color); //
           if (data.status_color === "cancelled" || data.status_color === "#fee2e2") { //
             var targetR = parseInt(data.row_id); //
@@ -432,26 +351,6 @@ function doGet(e) {
     var allSheetNames = []; //
     
     var params = e && e.parameter ? e.parameter : {}; //
-    if (params.action === "get_auth_users") { //
-      var authSheet = ss.getSheetByName("Auth"); //
-      var users = []; //
-      var rolesByRow = {
-        3: "owner",
-        4: "admin",
-        5: "moderator",
-        6: "moderator",
-        7: "moderator",
-        8: "moderator",
-        9: "delivery"
-      };
-      if (authSheet) { //
-        for (var row = 3; row <= 9; row++) {
-          var username = authSheet.getRange(row, 3).getValue().toString().trim();
-          if (username) users.push({ username: username, role: rolesByRow[row] });
-        }
-      } //
-      return ContentService.createTextOutput(JSON.stringify({ status: "success", users: users })).setMimeType(ContentService.MimeType.JSON); //
-    }
     // --- 🔔 NOTIFICATIONS SYSTEM (GET) ---
     if (params.action === "get_notifications") { //
         var notifSheet = ss.getSheetByName("Notifications"); //
@@ -538,9 +437,7 @@ function readSheetData(sheet, sheetName) {
   // Read all the way up to AB (Column 28)
   var dataRange = sheet.getRange(4, 1, lastRow - 3, 28); //
   var values = dataRange.getValues(); //
-  var displayValues = dataRange.getDisplayValues(); //
   var formulas = dataRange.getFormulas(); //
-  var backgrounds = dataRange.getBackgrounds(); //
   
   var jsonData = []; //
   for (var i = 0; i < values.length; i++) { //
@@ -557,11 +454,8 @@ function readSheetData(sheet, sheetName) {
     } //
 
     var dateVal = "Unknown Date"; //
-    var displayDate = displayValues[i][16] ? displayValues[i][16].toString() : ""; //
     var rawDate = row[16]; //
-    if (displayDate) { //
-        dateVal = displayDate; //
-    } else if (rawDate) { //
+    if (rawDate) { //
         try { var d = new Date(rawDate); //
         if (!isNaN(d.getTime())) { dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); } else { dateVal = rawDate.toString(); //
         } //
@@ -595,7 +489,7 @@ function readSheetData(sheet, sheetName) {
     if (row[1] || row[8]) { //
       jsonData.push({ //
         insta: row[0], name: row[1], place: row[2], fib: row[3], price: row[4], //
-        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", shipping_cost: row[7], phone: row[8] != null ? row[8].toString() : "", //
+        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", phone: row[8] != null ? row[8].toString() : "", //
         box_name: row[9] != null ? row[9].toString() : "", lost: row[10], profit: row[11], //
         extra: extraValue, note: noteVal, link: (row[15] || ""), initial_payment: row[13], //
         date: dateVal, orderNo: orderNoValue, trackNo: (row[12] || ""), //
@@ -607,7 +501,6 @@ function readSheetData(sheet, sheetName) {
         primary_urls: primaryImgUrl, //
   
         id: rowIndex, sheet_name: sheetName, //
-        is_finished: backgrounds[i][0] === FINISHED_BOX_COLOR, //
         linkedOrderIds: linkedIds //
       }); //
     }
@@ -628,32 +521,11 @@ function transliterateToLatini(text) {
   return latiniStr; //
 } //
 
-function getShippingForPlace(place) {
-  var placeText = (place || "").toString().trim().toLowerCase();
-  if (placeText === "no location" || placeText === "-") return 0;
-  if (placeText.includes("erbil") || placeText.includes("hawler") || placeText.includes("hewler")) return 3000;
-  if (placeText.includes("iraq") || placeText.includes("outside kurdistan")) return 6000;
-  return 5000;
-}
-
 function handleOrder(data, sheetName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(); //
   var sheet = ss.getSheetByName(sheetName); //
   if (!sheet) { try { sheet = ss.insertSheet(sheetName); } catch(e) { return { 'result': 'error', 'message': 'Could not create sheet: ' + sheetName }; //
   } } //
-
-  var requestId = (data.client_request_id || data.request_id || "").toString().trim(); //
-  if (requestId && (!data.row_id || data.row_id === "")) { //
-    var lastRequestRow = Math.min(sheet.getLastRow(), MAX_ROW_LIMIT); //
-    if (lastRequestRow >= 4) { //
-      var requestIds = sheet.getRange(4, 29, lastRequestRow - 3, 1).getValues(); //
-      for (var reqIdx = 0; reqIdx < requestIds.length; reqIdx++) { //
-        if (requestIds[reqIdx][0] && requestIds[reqIdx][0].toString() === requestId) { //
-          return { 'result': 'success', 'status': 'success', 'message': 'Created Row ' + (reqIdx + 4), 'deduped': true }; //
-        } //
-      } //
-    } //
-  } //
   
   var targetRow; //
   var isUpdate = false; //
@@ -682,10 +554,6 @@ function handleOrder(data, sheetName) {
     } //
   }
   if (targetRow > MAX_ROW_LIMIT) return { 'result': 'error', 'message': 'Sheet Full!' }; //
-  if (isUpdate && isFinishedRow(sheet, targetRow)) {
-    return { 'result': 'locked', 'status': 'locked', 'message': 'Row ' + targetRow + ' is finished and can only be changed manually in the sheet.' };
-  }
-  var savedDateValue = isUpdate ? sheet.getRange(targetRow, 17).getDisplayValue() : "";
 
   data.name = transliterateToLatini(data.name); //
   data.place = transliterateToLatini(data.place); //
@@ -715,23 +583,7 @@ function handleOrder(data, sheetName) {
   } //
   var rawPrice = priceInput.toString().replace(/,/g, '').replace(/[^0-9.]/g, '').trim(); //
   var basePrice = parseFloat(rawPrice) || 0; //
-  var linkedRowsForFree = [];
-  var linkedGroupTotal = basePrice;
-  if (data.linkedOrderIds && data.linkedOrderIds.length > 0) {
-    for (var lg = 0; lg < data.linkedOrderIds.length; lg++) {
-      var linkedFreeRow = parseInt(data.linkedOrderIds[lg].toString().split(":")[0]);
-      if (!isNaN(linkedFreeRow) && linkedFreeRow !== targetRow) {
-        linkedRowsForFree.push(linkedFreeRow);
-        var linkedPriceForTotal = parseFloat(sheet.getRange(linkedFreeRow, 5).getValue()) || 0;
-        var linkedExtraForTotal = sheet.getRange(linkedFreeRow, 19).getDisplayValue().toLowerCase();
-        if (linkedExtraForTotal.includes("free")) {
-          linkedPriceForTotal += getShippingForPlace(sheet.getRange(linkedFreeRow, 3).getDisplayValue());
-        }
-        linkedGroupTotal += linkedPriceForTotal;
-      }
-    }
-  }
-  if (linkedGroupTotal >= 118000) { //
+  if (basePrice >= 118000) { //
     var currentExtra = (data.extra || "").toString().toLowerCase(); //
     if (!currentExtra.includes("free")) { data.extra = data.extra ? (data.extra + " - Free") : "Free"; //
     } //
@@ -767,27 +619,9 @@ function handleOrder(data, sheetName) {
   }
 
   var isFreeDelivery = (data.extra || "").toString().toLowerCase().includes("free"); //
-  var freeShippingForSheet = 0;
-  if (isFreeDelivery && !isNoLocation) {
-    freeShippingForSheet = actualShipping;
-    for (var fs = 0; fs < linkedRowsForFree.length; fs++) {
-      var linkedRow = linkedRowsForFree[fs];
-      var linkedExtraCell = sheet.getRange(linkedRow, 19);
-      var linkedExtraValue = linkedExtraCell.getDisplayValue();
-      if (!linkedExtraValue.toLowerCase().includes("free")) {
-        var linkedShippingForSheet = getShippingForPlace(sheet.getRange(linkedRow, 3).getDisplayValue());
-        if (linkedShippingForSheet > 0) {
-          var linkedSheetPrice = parseFloat(sheet.getRange(linkedRow, 5).getValue()) || 0;
-          sheet.getRange(linkedRow, 5).setValue(linkedSheetPrice - linkedShippingForSheet).setNumberFormat("#,##0");
-        }
-        linkedExtraCell.setValue(linkedExtraValue ? linkedExtraValue + " - Free" : "Free");
-      }
-    }
-  }
-
-  var sheetItemPrice = isFreeDelivery && !isNoLocation
-    ? basePrice - Math.abs(freeShippingForSheet)
-    : basePrice; //
+  var sheetItemPrice = basePrice; //
+  if (isFreeDelivery && !isNoLocation) { sheetItemPrice = basePrice - actualShipping; //
+  } //
   
   if (!isUpdate && !isLinkedNewOrder && hasShippingDetails) { //
     var l1Cell = sheet.getRange("L1"); //
@@ -802,13 +636,10 @@ function handleOrder(data, sheetName) {
   if (data.price === '') { sheet.getRange(targetRow, 5).clearContent(); //
   } else { sheet.getRange(targetRow, 5).setValue(sheetItemPrice).setNumberFormat("#,##0"); //
   } //
+  
   sheet.getRange(targetRow, 7).setValue(data.pics_text || ''); //
   sheet.getRange(targetRow, 9).setValue(finalPhone); //
   if (data.box_name !== undefined) { sheet.getRange(targetRow, 10).setValue(data.box_name); //
-  } //
-  if (requestId) { //
-    sheet.getRange(targetRow, 29).setValue(requestId); //
-    try { sheet.hideColumns(29); } catch(e) {} //
   } //
 
   var extraText = (data.extra || "").toString().trim(); //
@@ -824,7 +655,7 @@ function handleOrder(data, sheetName) {
   if (!isUpdate || data.restore === "true") { //
       var now = new Date(); //
       var formattedDate = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); //
-      sheet.getRange(targetRow, 17).setNumberFormat("@").setValue(formattedDate); //
+      sheet.getRange(targetRow, 17).setValue(formattedDate); //
   }
 
   data.orderNo = (data.extra || "Pending"); //
@@ -890,7 +721,6 @@ function handleOrder(data, sheetName) {
       } catch (e) { console.log("Telegram Error: " + e); //
       } //
   }
-  if (isUpdate && savedDateValue) { sheet.getRange(targetRow, 17).setNumberFormat("@").setValue(savedDateValue); } //
   return { 'result': 'success', 'status': 'success', 'message': isUpdate ? //
   'Updated Row ' + targetRow : 'Created Row ' + targetRow }; //
 } //
@@ -910,7 +740,6 @@ function mergeBuyingPrice(sheetName, rowIds, price, shipping) {
     var linkedString = rowIds.join(","); //
     for (var i = 0; i < numRows; i++) { //
        var currentRow = rowIds[i]; //
-       if (isFinishedRow(sheet, currentRow)) continue; //
        sheet.getRange(currentRow, 28).setValue(linkedString); // AB
        if (i === 0 && price !== undefined && price !== "") { sheet.getRange(currentRow, 6).setValue(price).setNumberFormat("#,##0"); //
        } //
@@ -928,7 +757,6 @@ function generateReceiptPdf(sheetName, rowId) {
   
   var row = parseInt(rowId); //
   var values = sheet.getRange(row, 1, 1, 28).getValues()[0]; //
-  var receiptDate = sheet.getRange(row, 17).getDisplayValue() || new Date().toLocaleDateString('en-GB'); //
   
   var data = {
     insta: values[0], name: values[1], place: values[2], fib: values[3], price: values[4], pics_text: values[6], phone: values[8], 
@@ -975,7 +803,7 @@ function generateReceiptPdf(sheetName, rowId) {
   var finalTotal = (itemPrice + shippingCostForPDF) - initialPayment; //
   var shippingDisplay = isFree ? //
   "Free" : shippingCostForPDF.toLocaleString() + " IQD"; //
-  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;}.sub-brand{font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #222;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${receiptDate}</span><span>Order: ${data.orderNo}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || //
+  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;}.sub-brand{font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #222;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${new Date().toLocaleDateString('en-GB')}</span><span>Order: ${data.orderNo}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || //
   "-"}</span></div><div class="info-row"><span class="label">Instagram</span><span class="value">${data.insta || "-"}</span></div><div class="info-row"><span class="label">Phone</span><span class="value">${data.phone || "-"}</span></div><div class="info-row"><span class="label">Location</span><span class="value">${data.place || //
   "-"}</span></div><div class="info-row"><span class="label">Item Price</span><span class="value">${itemPrice.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">FIB</span><span class="value">- ${initialPayment.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">Delivery</span><span class="value">${shippingDisplay}</span></div><div class="total-section"><div class="total-row"><span>Total</span><span>${finalTotal.toLocaleString()} IQD</span></div></div></body></html>`; //
   return { 'status': 'success', 'pdfBase64': Utilities.base64Encode(Utilities.newBlob(html, "text/html", "Receipt.html").getAs("application/pdf").getBytes()) }; //

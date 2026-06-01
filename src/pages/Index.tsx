@@ -24,6 +24,7 @@ const TeamView = React.lazy(() => import('@/components/app/TeamView'));
 const DEFAULT_YEAR = Object.keys(YEARS_CONFIG).sort().pop() || '2026';
 const DEFAULT_MONTH = ACTIVE_ORDER_SHEET;
 const ALL_MONTHS = Object.values(YEARS_CONFIG).flat();
+const CACHE_VERSION = 'full-sheet-data-v2';
 
 const sheetIndex: Record<string, number> = {};
 let globalIdx = 0;
@@ -99,6 +100,18 @@ const Index: React.FC = () => {
   const [showCameraSearch, setShowCameraSearch] = useState(false);
 
   useEffect(() => {
+    const versionKey = 'app_cache_version';
+    if (localStorage.getItem(versionKey) === CACHE_VERSION) return;
+
+    Object.keys(localStorage).forEach(key => {
+      if (key === 'app_initial_data' || key.startsWith('app_month_data_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    localStorage.setItem(versionKey, CACHE_VERSION);
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem('app_searchQuery', searchQuery);
   }, [searchQuery]);
 
@@ -135,15 +148,21 @@ const Index: React.FC = () => {
   }, [role]);
 
   // Helper to merge orders without duplicates
-  const mergeOrders = useCallback((prev: Order[], newData: Order[], sheetToReplace: string) => {
-    const filtered = prev.filter(o => o.sheet_name !== sheetToReplace);
+  const mergeOrders = useCallback((prev: Order[], newData: Order[], sheetsToReplace: string | string[]) => {
+    const replaceSet = new Set(Array.isArray(sheetsToReplace) ? sheetsToReplace : [sheetsToReplace]);
+    const filtered = prev.filter(o => !replaceSet.has(o.sheet_name));
     return [...filtered, ...newData];
   }, []);
 
   const applyApiResponse = useCallback((json: ApiResponse, isBackground: boolean) => {
     if (json.status !== 'success') return;
-    setMonthlyStats(json.meta.monthly_stats || {});
-    const scriptActiveSheet = json.meta.active_sheet || DEFAULT_MONTH;
+    const meta = json.meta || ({} as ApiResponse['meta']);
+    setMonthlyStats(meta.monthly_stats || {});
+    const scriptActiveSheet = meta.active_sheet || DEFAULT_MONTH;
+    const data = (Array.isArray(json.data) ? json.data : []).map(o => ({
+      ...o,
+      sheet_name: o.sheet_name || scriptActiveSheet,
+    }));
     setActiveMonth(scriptActiveSheet);
     if (!isBackground) {
       if (!localStorage.getItem('app_viewingMonth') || !ALL_MONTHS.includes(localStorage.getItem('app_viewingMonth') || '')) {
@@ -151,11 +170,15 @@ const Index: React.FC = () => {
       }
       if (!localStorage.getItem('app_activeYear') || !YEARS_CONFIG[localStorage.getItem('app_activeYear') || '']) setActiveYear(DEFAULT_YEAR);
     }
-    if (json.data?.length) {
-      const sheet = json.data[0].sheet_name;
-      setAllOrders(prev => mergeOrders(prev, json.data, sheet));
-      setLoadedMonths(prev => new Set(prev).add(sheet));
-    }
+    const sheets = data.length
+      ? [...new Set(data.map(o => o.sheet_name).filter(Boolean))]
+      : [scriptActiveSheet];
+    setAllOrders(prev => mergeOrders(prev, data, sheets));
+    setLoadedMonths(prev => {
+      const next = new Set(prev);
+      sheets.forEach(sheet => next.add(sheet));
+      return next;
+    });
   }, [mergeOrders]);
 
   const fetchInitialData = useCallback(async () => {
@@ -199,7 +222,8 @@ const Index: React.FC = () => {
       try {
         const json: ApiResponse = JSON.parse(cached);
         if (json.status === 'success') {
-          setAllOrders(prev => mergeOrders(prev, json.data, month));
+          const data = (Array.isArray(json.data) ? json.data : []).map(o => ({ ...o, sheet_name: o.sheet_name || month }));
+          setAllOrders(prev => mergeOrders(prev, data, month));
           setLoadedMonths(prev => new Set(prev).add(month));
           hasCached = true;
         }
@@ -214,8 +238,9 @@ const Index: React.FC = () => {
       let json: ApiResponse | null = null;
       try { json = JSON.parse(text); } catch (e) { console.warn("Invalid DB JSON"); }
       if (json && json.status === 'success') {
+        const data = (Array.isArray(json.data) ? json.data : []).map(o => ({ ...o, sheet_name: o.sheet_name || month }));
         localStorage.setItem(cacheKey, JSON.stringify(json));
-        setAllOrders(prev => mergeOrders(prev, json.data, month));
+        setAllOrders(prev => mergeOrders(prev, data, month));
         setLoadedMonths(prev => new Set(prev).add(month));
       }
     } catch (err) { console.error(err); }
@@ -225,8 +250,8 @@ const Index: React.FC = () => {
   const loadAllHistory = useCallback(async () => {
     setIsSearchingAll(true);
     // Parallelize with a small concurrency window — much faster than 1.5s/month serial
-    const pending = Object.values(YEARS_CONFIG).flat().filter(
-      m => !loadedMonthsRef.current.has(m) && monthlyStats[m]?.count > 0
+    const pending = ALL_MONTHS.filter(
+      m => !loadedMonthsRef.current.has(m) && (monthlyStats[m]?.count || 0) > 0
     );
     const CONCURRENCY = 4;
     let i = 0;
@@ -238,7 +263,7 @@ const Index: React.FC = () => {
     });
     await Promise.all(workers);
     setIsSearchingAll(false);
-  }, [monthlyStats, fetchMonthData]);
+  }, [fetchMonthData, monthlyStats]);
 
   useEffect(() => { fetchInitialData(); }, [fetchInitialData]);
   useEffect(() => { if (viewingMonth && !loadedMonths.has(viewingMonth)) fetchMonthData(viewingMonth); }, [viewingMonth, loadedMonths, fetchMonthData]);
@@ -271,12 +296,19 @@ const Index: React.FC = () => {
       
       if (jsonMain && jsonMain.status === 'success') {
         localStorage.setItem('app_initial_data', JSON.stringify(jsonMain));
-        setMonthlyStats(jsonMain.meta.monthly_stats || {});
-        if (jsonMain.meta.active_sheet) setActiveMonth(jsonMain.meta.active_sheet);
-        if (jsonMain.data?.length) {
-          const sheet = jsonMain.data[0].sheet_name;
-          setAllOrders(prev => mergeOrders(prev, jsonMain.data, sheet));
-          setLoadedMonths(prev => new Set(prev).add(sheet));
+        const meta = jsonMain.meta || ({} as ApiResponse['meta']);
+        const scriptActiveSheet = meta.active_sheet || DEFAULT_MONTH;
+        const data = (Array.isArray(jsonMain.data) ? jsonMain.data : []).map(o => ({ ...o, sheet_name: o.sheet_name || scriptActiveSheet }));
+        setMonthlyStats(meta.monthly_stats || {});
+        if (meta.active_sheet) setActiveMonth(meta.active_sheet);
+        if (data.length) {
+          const sheets = [...new Set(data.map(o => o.sheet_name).filter(Boolean))];
+          setAllOrders(prev => mergeOrders(prev, data, sheets));
+          setLoadedMonths(prev => {
+            const next = new Set(prev);
+            sheets.forEach(sheet => next.add(sheet));
+            return next;
+          });
         }
       }
 
@@ -287,8 +319,9 @@ const Index: React.FC = () => {
       try { jsonMonth = JSON.parse(textMonth); } catch (e) {}
 
       if (jsonMonth && jsonMonth.status === 'success') {
+        const data = (Array.isArray(jsonMonth.data) ? jsonMonth.data : []).map(o => ({ ...o, sheet_name: o.sheet_name || month }));
         localStorage.setItem(`app_month_data_${month}`, JSON.stringify(jsonMonth));
-        setAllOrders(prev => mergeOrders(prev, jsonMonth.data, month));
+        setAllOrders(prev => mergeOrders(prev, data, month));
         setLoadedMonths(prev => new Set(prev).add(month));
       }
     } catch (err) { console.warn('Force refresh issue (network/timeout):', err instanceof Error ? err.message : err); }
@@ -317,17 +350,19 @@ const Index: React.FC = () => {
       try {
         const ctrl = new AbortController();
         ((silentRefresh as any)._ctrls ||= {})[target] = ctrl;
-        timeout = window.setTimeout(() => ctrl.abort(), 7000);
+        timeout = window.setTimeout(() => ctrl.abort(), 30000);
         const res = await fetch(`${SCRIPT_URL}?month=${target}&skip_stats=true&t=${Date.now()}`, { credentials: 'omit', signal: ctrl.signal });
         const text = await res.text();
         let json: ApiResponse | null = null;
         try { json = JSON.parse(text); } catch(e) {}
         if (json && json.status === 'success') {
           localStorage.setItem(`app_month_data_${target}`, JSON.stringify(json));
-          setMonthlyStats(prev => ({ ...prev, ...json.meta.monthly_stats }));
-          if (json.meta.active_sheet) setActiveMonth(json.meta.active_sheet);
-          if (json.data?.length) {
-            setAllOrders(prev => mergeOrders(prev, json.data, target));
+          const meta = json.meta || ({} as ApiResponse['meta']);
+          const data = (Array.isArray(json.data) ? json.data : []).map(o => ({ ...o, sheet_name: o.sheet_name || target }));
+          setMonthlyStats(prev => ({ ...prev, ...(meta.monthly_stats || {}) }));
+          if (meta.active_sheet) setActiveMonth(meta.active_sheet);
+          if (data.length) {
+            setAllOrders(prev => mergeOrders(prev, data, target));
             setLoadedMonths(prev => new Set(prev).add(target));
           }
         }
@@ -453,13 +488,12 @@ const Index: React.FC = () => {
 
     // Fire request then refresh
     try {
-      const displayPrice = getDisplayPrice(order, allOrders);
       const proofStr = Array.isArray(order.proof_urls)
         ? order.proof_urls.filter(Boolean).join(',')
         : (order.proof_urls || '');
+      const { price: _price, sheet_price: _sheetPrice, customer_price: _customerPrice, ...orderWithoutPrice } = order as any;
       await fetchWithRetry(SCRIPT_URL, { method: 'POST', body: JSON.stringify({
-        ...order,
-        price: displayPrice,
+        ...orderWithoutPrice,
         sheet: order.sheet_name,
         row_id: order.id,
         extra: newExtra,

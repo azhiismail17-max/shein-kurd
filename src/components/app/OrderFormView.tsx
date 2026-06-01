@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Order, SCRIPT_URL, getOrderStatus, STATUS_COLORS } from '@/types';
 import { findAutoBoxName } from '@/lib/autoBox';
-import { getDisplayPrice, isOrderFree, uploadToImgBB, fileToBase64 } from '@/lib/order-utils';
+import { getDisplayPrice, getSheetPriceForSave, isOrderFree, uploadToImgBB, fileToBase64 } from '@/lib/order-utils';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { recordOrderCreated, resolveTeamUsername } from '@/lib/teamActivity';
 import { ChevronLeft, Upload, X, Sparkles, Link2, Eye } from 'lucide-react';
@@ -15,6 +15,21 @@ interface OrderFormViewProps {
 }
 
 type Region = 'erbil' | 'outside_erbil' | 'outside_kurdistan' | 'sulaymani' | 'duhok' | 'kirkuk' | 'zaxo' | 'no_location' | '';
+
+const deriveRegionFromPlace = (placeValue: string | undefined | null): Region => {
+  const place = String(placeValue || '').toLowerCase();
+  if (place.includes('no location')) return 'no_location';
+  if (place.includes('outside erbil')) return 'outside_erbil';
+  if (place.includes('iraq')) return 'outside_kurdistan';
+  if (place.includes('sulaymani')) return 'sulaymani';
+  if (place.includes('duhok')) return 'duhok';
+  if (place.includes('kirkuk')) return 'kirkuk';
+  if (place.includes('zaxo') || place.includes('zakho')) return 'zaxo';
+  if (place.includes('erbil') || place.includes('hawler') || place.includes('هەولێر')) return 'erbil';
+  if (place.includes('halabja') || place.includes('koya') || place.includes('ranya') || place.includes('soran')) return 'outside_erbil';
+  if (place) return 'outside_erbil';
+  return '';
+};
 
 const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder, onCancel, onSuccess, allOrders }) => {
   const [step, setStep] = useState<1 | 2>(1);
@@ -94,9 +109,8 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
         ...editingOrder,
         price: getDisplayPrice(editingOrder, allOrders).toString()
       });
-      if (isOrderFree(editingOrder)) {
-        setFreeShipping(true);
-      }
+      setRegion(deriveRegionFromPlace(editingOrder.place));
+      setFreeShipping(isOrderFree(editingOrder));
       
       const formatImg = (img: string) => {
         if (img.startsWith('http') || img.startsWith('data:')) return img;
@@ -295,6 +309,11 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
       const isAutoFree = (priceVal + linkedTotal) >= 118000;
       
       const shouldApplyFree = freeShipping || isAutoFree;
+      const originalDisplayPrice = isEditing ? getDisplayPrice(editingOrder!, allOrders) : 0;
+      const priceWasChanged = !isEditing || priceVal !== originalDisplayPrice;
+      const sheetPrice = priceWasChanged
+        ? getSheetPriceForSave(priceVal, formData.place, shouldApplyFree, formData.shipping_cost)
+        : Number(String(editingOrder!.price).replace(/[^0-9.-]+/g, '')) || 0;
 
       let cleanExtra = String(formData.extra || '').replace(/\bFree\b/i, '').trim();
       const extraWithFree = shouldApplyFree
@@ -314,7 +333,9 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({ activeSheet, editingOrder
       const tempId = isEditing ? undefined : Date.now();
       const payload = { 
           ...formData, 
-          price: formData.price,
+          price: sheetPrice,
+          sheet_price: sheetPrice,
+          customer_price: priceWasChanged ? priceVal : originalDisplayPrice,
           box_name: newBoxNameAttr,
           primary_urls: existingPrimaryUrls.join(','), 
           proof_urls: existingProofUrls.join(','),
