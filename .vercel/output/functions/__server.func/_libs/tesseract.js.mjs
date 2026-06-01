@@ -7,6 +7,27 @@ import require$$0$1 from "util";
 import require$$0$2 from "fs";
 import { r as require$$2 } from "./node-fetch.mjs";
 import { r as requireIsUrl } from "./is-url.mjs";
+function _mergeNamespaces(n, m) {
+  for (var i = 0; i < m.length; i++) {
+    const e = m[i];
+    if (typeof e !== "string" && !Array.isArray(e)) {
+      for (const k in e) {
+        if (k !== "default" && !(k in n)) {
+          const d = Object.getOwnPropertyDescriptor(e, k);
+          if (d) {
+            Object.defineProperty(n, k, d.get ? d : {
+              enumerable: true,
+              get: function() {
+                return e[k];
+              }
+            });
+          }
+        }
+      }
+    }
+  }
+  return Object.freeze(n);
+}
 var getId;
 var hasRequiredGetId;
 function requireGetId() {
@@ -674,6 +695,11 @@ function requireSrc() {
 }
 var srcExports = requireSrc();
 const Tesseract = /* @__PURE__ */ getDefaultExportFromCjs(srcExports);
+const index = /* @__PURE__ */ _mergeNamespaces({
+  __proto__: null,
+  default: Tesseract
+}, [srcExports]);
 export {
-  Tesseract as T
+  Tesseract as T,
+  index as i
 };

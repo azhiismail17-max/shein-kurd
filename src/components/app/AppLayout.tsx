@@ -9,6 +9,7 @@ import NotificationsDropdown from './NotificationsDropdown';
 import { SystemKey, SystemSwitcher } from './SystemSwitcher';
 import ThemeColorPicker from './ThemeColorPicker';
 import { recordPresence } from '@/lib/teamActivity';
+import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -245,11 +246,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
               <button onClick={onCameraSearch} className="p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Image Search">
                 <Camera size={18} />
               </button>
-              {role === 'owner' && (
-                <button onClick={onSearchAll} className="p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Price Calc">
-                  <Calculator size={18} />
-                </button>
-              )}
+              {role === 'owner' && <GlobalCalculatorButton variant="inline" />}
             </div>
           </div>
         </header>

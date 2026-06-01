@@ -9,7 +9,6 @@ import AppLayout from '@/components/app/AppLayout';
 import { LoginView } from '@/components/app/LoginView';
 import { SystemKey } from '@/components/app/SystemSwitcher';
 import { recordOrderDeleted } from '@/lib/teamActivity';
-import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
 
 const DashboardView = React.lazy(() => import('@/components/app/DashboardView'));
 const OrderFormView = React.lazy(() => import('@/components/app/OrderFormView'));
@@ -676,7 +675,6 @@ const Index: React.FC = () => {
         )}
         {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
       </React.Suspense>
-      <GlobalCalculatorButton onOpenPriceCalc={() => setActiveTab('calculator')} />
     </>
   );
 };

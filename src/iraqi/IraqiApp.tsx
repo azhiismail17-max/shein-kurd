@@ -7,7 +7,6 @@ import { toast } from 'sonner';
 import AppLayout from '@/iraqi/components/app/AppLayout';
 import { LoginView } from '@/iraqi/components/app/LoginView';
 import { recordOrderDeleted } from '@/lib/teamActivity';
-import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
 
 const DashboardView = React.lazy(() => import('@/iraqi/components/app/DashboardView'));
 const OrderFormView = React.lazy(() => import('@/iraqi/components/app/OrderFormView'));
@@ -630,7 +629,6 @@ const Index: React.FC = () => {
         )}
         {showCameraSearch && <CameraSearchModal allOrders={allOrders} onOrderClick={o => { setShowCameraSearch(false); setSelectedOrder(o); }} onClose={() => setShowCameraSearch(false)} />}
       </React.Suspense>
-      <GlobalCalculatorButton onOpenPriceCalc={() => setActiveTab('calculator')} />
     </>
   );
 };
