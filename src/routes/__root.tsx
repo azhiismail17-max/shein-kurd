@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -8,10 +9,15 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import appCss from "../styles.css?url";
+
+// Lazy: these pull in @radix-ui, which must not load until the main React
+// chunk has fully initialized. __root.tsx is always eager (every route needs
+// it for SSR), so importing Radix-based components here directly puts them
+// on the critical path ahead of React being ready - which crashes the whole
+// app with "Cannot read properties of undefined (reading 'forwardRef')".
+// Deferring them avoids that ordering race entirely.
+const GlobalProviders = lazy(() => import("@/components/GlobalProviders"));
 
 function NotFoundComponent() {
   return (
@@ -162,11 +168,11 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <Outlet />
-      </TooltipProvider>
+      <Suspense fallback={<Outlet />}>
+        <GlobalProviders>
+          <Outlet />
+        </GlobalProviders>
+      </Suspense>
     </QueryClientProvider>
   );
 }
