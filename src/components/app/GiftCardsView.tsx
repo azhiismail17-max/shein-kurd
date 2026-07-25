@@ -29,16 +29,10 @@ interface GiftCardsViewProps {
 const CARD_PRICES = [100, 300, 500, 800, 1000];
 const PAYMENT_OPTIONS = ["Zaincash", "Qi card", "Other"];
 const LOCAL_GIFT_CARDS_KEY = "kurdistani_gift_cards_cache";
-const LOCAL_GIFT_CARD_TS_KEY = "kurdistani_gift_cards_cache_ts";
 const LOCAL_GIFT_CARD_RATES_KEY = "kurdistani_gift_card_iqd_rates";
 const LOCAL_GIFT_CARD_BOX_PRICES_KEY = "kurdistani_gift_card_box_prices";
 const LOCAL_GIFT_CARD_BOX_LOSSES_KEY = "kurdistani_gift_card_box_losses";
 const DEFAULT_IQD_RATES = { Zaincash: 401865, "Qi card": 419250 };
-// A local write is only trusted over the server's own copy of a card for this
-// long. After that, the server (shared across every device) wins, so a card
-// edited/spent on one device can't stay permanently stuck showing a stale
-// snapshot on another device once the background sync has had time to land.
-const RECENT_OPTIMISTIC_MS = 15000;
 
 const money = (value: number) => `$${Number(value || 0).toLocaleString()}`;
 const iqdMoney = (value: number) => `${Math.round(Number(value || 0)).toLocaleString()} IQD`;
@@ -85,19 +79,6 @@ const readLocalGiftCards = (): GiftCard[] => {
     return [];
   }
 };
-const readLocalTimestamps = (): Record<string, number> => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(LOCAL_GIFT_CARD_TS_KEY) || "{}");
-    return saved && typeof saved === "object" ? saved : {};
-  } catch {
-    return {};
-  }
-};
-const touchLocalTimestamp = (id: string) => {
-  const timestamps = readLocalTimestamps();
-  timestamps[id] = Date.now();
-  localStorage.setItem(LOCAL_GIFT_CARD_TS_KEY, JSON.stringify(timestamps));
-};
 const writeLocalGiftCard = (card: GiftCard) => {
   const cards = readLocalGiftCards();
   const next = [
@@ -109,7 +90,6 @@ const writeLocalGiftCard = (card: GiftCard) => {
     ),
   ];
   localStorage.setItem(LOCAL_GIFT_CARDS_KEY, JSON.stringify(next));
-  touchLocalTimestamp(card.id);
 };
 const updateLocalGiftCard = (id: string, updater: (card: GiftCard) => GiftCard) => {
   const cards = readLocalGiftCards();
@@ -117,7 +97,6 @@ const updateLocalGiftCard = (id: string, updater: (card: GiftCard) => GiftCard) 
     LOCAL_GIFT_CARDS_KEY,
     JSON.stringify(cards.map((card) => (card.id === id ? updater(card) : card))),
   );
-  touchLocalTimestamp(id);
 };
 const saveLocalGiftCardUpdate = (card: GiftCard, updater: (card: GiftCard) => GiftCard) => {
   const cards = readLocalGiftCards();
@@ -126,7 +105,39 @@ const saveLocalGiftCardUpdate = (card: GiftCard, updater: (card: GiftCard) => Gi
     ? cards.map((saved) => (saved.id === card.id ? updater(saved) : saved))
     : [updater(card), ...cards];
   localStorage.setItem(LOCAL_GIFT_CARDS_KEY, JSON.stringify(next));
-  touchLocalTimestamp(card.id);
+};
+// A local override is only ever dropped once the server's own copy of that
+// same card already shows the same numbers - never on a timer, and never
+// just because a save request returned "success" (a slow refresh could
+// still be showing older data at that instant). This is what makes a synced
+// edit disappear from the local cache without a flash: it happens exactly
+// when the fresh, shared server data has caught up, so there is nothing
+// visibly different to swap to.
+const giftCardValuesMatch = (a: GiftCard, b: GiftCard) =>
+  Number(a.remaining || 0) === Number(b.remaining || 0) &&
+  Number(a.spent || 0) === Number(b.spent || 0) &&
+  Number(a.card_price || 0) === Number(b.card_price || 0) &&
+  String(a.payment_method || "") === String(b.payment_method || "") &&
+  String(a.payment_other || "") === String(b.payment_other || "") &&
+  String(a.notes || "") === String(b.notes || "") &&
+  JSON.stringify([...(a.linked_boxes || [])].sort()) ===
+    JSON.stringify([...(b.linked_boxes || [])].sort());
+
+const reconcileLocalGiftCards = (serverCards: GiftCard[]): GiftCard[] => {
+  const cards = readLocalGiftCards();
+  const reconciled = cards.filter((localCard) => {
+    const serverMatch = serverCards.find(
+      (serverCard) =>
+        serverCard.id === localCard.id ||
+        (serverCard.card_number === localCard.card_number &&
+          serverCard.card_pin === localCard.card_pin),
+    );
+    return !serverMatch || !giftCardValuesMatch(localCard, serverMatch);
+  });
+  if (reconciled.length !== cards.length) {
+    localStorage.setItem(LOCAL_GIFT_CARDS_KEY, JSON.stringify(reconciled));
+  }
+  return reconciled;
 };
 const readBoxPrices = (): Record<string, number> => {
   try {
@@ -204,19 +215,18 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   const [boxLosses, setBoxLosses] = useState<Record<string, number>>(() => readBoxLosses());
 
   useEffect(() => {
-    setLocalCards(readLocalGiftCards());
+    setLocalCards(reconcileLocalGiftCards(giftCards));
   }, [giftCards]);
 
   const displayedCards = useMemo(() => {
-    // Server data (shared by every device) always wins once a local edit has
-    // had time to sync — otherwise a card touched on one device stays pinned
-    // to that device's own stale snapshot forever, even after other devices
-    // update it. Local data only fills in (a) brand-new cards the server
-    // doesn't know about yet, or (b) an edit still inside its brief
-    // optimistic window, so this device's own action still feels instant.
-    const timestamps = readLocalTimestamps();
-    const now = Date.now();
-    const isRecent = (id: string) => now - (timestamps[id] || 0) < RECENT_OPTIMISTIC_MS;
+    // A local edit shows immediately and keeps showing on THIS device for as
+    // long as it stays in the local cache. The effect above is what clears a
+    // card from that cache - and only once the server's own data already
+    // matches it (see reconcileLocalGiftCards) - so a slow or briefly-failed
+    // sync can never make an edit look like it disappeared. Once cleared,
+    // every device (including this one) shows the server's shared copy
+    // again, which is how a stale local snapshot from a past edit stops
+    // permanently overriding what other devices see.
     const findLocalMatch = (serverCard: GiftCard) =>
       localCards.find(
         (card) =>
@@ -229,7 +239,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
       const localMatch = findLocalMatch(serverCard);
       if (!localMatch) return serverCard;
       usedLocalIds.add(localMatch.id);
-      return isRecent(localMatch.id) ? localMatch : serverCard;
+      return localMatch;
     });
     for (const localCard of localCards) {
       if (!usedLocalIds.has(localCard.id)) merged.push(localCard);
@@ -252,6 +262,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
         sheetName: string;
         rowIds: (string | number)[];
         loss: number;
+        boxCost: number;
       }
     >();
     for (const order of orders) {
@@ -266,10 +277,13 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
         sheetName,
         rowIds: [],
         loss: 0,
+        boxCost: 0,
       };
       current.rowIds.push(order.id);
       const orderLoss = parseAmount(String(order.lost || ""));
       if (orderLoss > 0) current.loss = orderLoss;
+      const orderBoxCost = parseAmount(String(order.box_cost || ""));
+      if (orderBoxCost > 0) current.boxCost = orderBoxCost;
       map.set(key, current);
     }
     return Array.from(map.values()).sort((a, b) =>
@@ -471,6 +485,8 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
           : "Box connected to gift card.",
     });
 
+    const amountIqd = usdToIqd(amount, card.payment_method, iqdRates);
+
     fetchWithRetry(SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({
@@ -493,6 +509,20 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
                 sheet_name: "Gift Card",
                 id: card.id,
                 amount,
+              }),
+            }).then(readScriptResponse)
+          : undefined,
+      )
+      .then(() =>
+        amountIqd > 0
+          ? fetchWithRetry(SCRIPT_URL, {
+              method: "POST",
+              body: JSON.stringify({
+                action: "update_box_field_once",
+                field: "box_cost",
+                row_ids: box.rowIds,
+                sheet: box.sheetName || viewingMonth,
+                value: Math.round(box.boxCost + amountIqd),
               }),
             }).then(readScriptResponse)
           : undefined,
@@ -526,6 +556,9 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
     setMessage({ type: "success", text: `Box buy saved: ${money(nextAmount)}.` });
 
     if (delta === 0 || card.id.startsWith("local-")) return;
+    const box = boxInfo.get(boxKey);
+    const deltaIqd = usdToIqd(delta, card.payment_method, iqdRates);
+
     fetchWithRetry(SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({
@@ -538,6 +571,20 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
       }),
     })
       .then(readScriptResponse)
+      .then(() =>
+        box && deltaIqd !== 0
+          ? fetchWithRetry(SCRIPT_URL, {
+              method: "POST",
+              body: JSON.stringify({
+                action: "update_box_field_once",
+                field: "box_cost",
+                row_ids: box.rowIds,
+                sheet: box.sheetName || viewingMonth,
+                value: Math.max(Math.round(box.boxCost + deltaIqd), 0),
+              }),
+            }).then(readScriptResponse)
+          : undefined,
+      )
       .then(() => onRefresh())
       .catch((error) => {
         console.warn("Gift card box buy sync failed", error);
