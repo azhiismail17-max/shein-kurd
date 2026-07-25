@@ -145,7 +145,7 @@ async function sendPush(request: Request) {
       ? `${system === "iraqi" ? "Iraqi" : "Kurdistani"} Warning`
       : `${system === "iraqi" ? "Iraqi" : "Kurdistani"} Total Link`,
     body: String(notification.message || "").slice(0, 240),
-    icon: "/logo-1080.png",
+    icon: "/logo-192.png",
     tag: `box-alert-${notificationId}`,
     notificationId,
     system,

@@ -207,7 +207,7 @@ export default function MessagesView({
           ) {
             showBrowserNotification(`${SYSTEM_LABEL} message from ${msg.senderId}`, {
               body: msg.text || "Sent an attachment",
-              icon: msg.imageUrl || "/logo-1080.png",
+              icon: msg.imageUrl || "/logo-192.png",
               tag: `iraqi-message-${topic}-${change.doc.id}`,
             });
           }

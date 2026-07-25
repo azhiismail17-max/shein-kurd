@@ -14,8 +14,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "Shein Notification";
   const options = {
     body: payload.body || "A new update needs your attention.",
-    icon: payload.icon || "/logo-1080.png",
-    badge: "/logo-1080.png",
+    icon: payload.icon || "/logo-192.png",
+    badge: "/logo-192.png",
     tag: payload.tag || "shein-phone-push",
     renotify: true,
     data: {

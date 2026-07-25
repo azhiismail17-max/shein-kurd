@@ -20,8 +20,8 @@ export async function showBrowserNotification(title: string, options: NotifyOpti
 
   const payload = {
     body: options.body,
-    icon: options.icon || "/logo-1080.png",
-    badge: "/logo-1080.png",
+    icon: options.icon || "/logo-192.png",
+    badge: "/logo-192.png",
     tag: options.tag,
   };
 

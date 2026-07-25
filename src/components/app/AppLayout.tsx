@@ -214,7 +214,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <div className="h-11 w-11 shrink-0 overflow-hidden rounded-2xl bg-sidebar-primary shadow-lg shadow-black/25 ring-1 ring-white/10 sm:h-12 sm:w-12">
                 <img
-                  src="/logo-1080.png"
+                  src="/logo-512.png"
                   alt="Shein Kurdistani"
                   className="h-full w-full object-cover"
                 />

@@ -113,7 +113,7 @@ export const LoginView = ({ onLogin }: { onLogin: (role: string) => void }) => {
           <div>
             <div className="w-14 h-14 overflow-hidden rounded-2xl bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-extrabold shadow-lg shadow-black/25 ring-1 ring-white/10">
               <img
-                src="/logo-1080.png"
+                src="/logo-512.png"
                 alt="Shein Kurdistani"
                 className="h-full w-full object-cover"
               />
@@ -145,9 +145,9 @@ export const LoginView = ({ onLogin }: { onLogin: (role: string) => void }) => {
         <div className="w-full max-w-sm lg:max-w-none mx-auto glass-surface rounded-2xl shadow-2xl shadow-slate-950/10 p-6 sm:p-8">
           <div className="text-center mb-8">
             <div className="mx-auto mb-6 flex justify-center">
-              {/* The square app logo is stored in the public folder as logo-1080.png. */}
+              {/* The square app logo is stored in the public folder as logo-512.png. */}
               <img
-                src="/logo-1080.png"
+                src="/logo-512.png"
                 alt="Shein Kurdistani"
                 className="w-24 h-32 sm:w-28 sm:h-40 object-cover rounded-2xl shadow-xl shadow-primary/10 border border-primary/20"
                 onError={(e) => {

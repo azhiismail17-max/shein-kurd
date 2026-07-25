@@ -1063,7 +1063,7 @@ const Index: React.FC = () => {
         <div className="flex items-center justify-center py-20 min-h-[60vh]">
           <div className="text-center flex flex-col items-center justify-center space-y-4">
             <img
-              src="/logo-1080.png"
+              src="/logo-512.png"
               alt="Shein Kurdistani Logo"
               className="w-24 h-36 object-cover rounded-xl shadow-lg border-2 border-primary/20 animate-pulse"
               onError={(e) => {
