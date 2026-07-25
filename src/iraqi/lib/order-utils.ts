@@ -170,6 +170,25 @@ const hasSameValidPhone = (a: Order, b: Order) => {
   return aPhones.some((phone) => bPhones.includes(phone));
 };
 
+const normalizeCustomerName = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const hasSameCustomerName = (a: Order, b: Order) => {
+  const aName = normalizeCustomerName(a.name || a.insta);
+  const bName = normalizeCustomerName(b.name || b.insta);
+  return Boolean(aName) && aName === bName;
+};
+
+/**
+ * Same phone or same name - the only basis on which orders may be linked,
+ * manually or automatically, so unrelated customers never end up merged.
+ */
+export const isSameCustomer = (a: Order, b: Order): boolean =>
+  hasSameValidPhone(a, b) || hasSameCustomerName(a, b);
+
 const parseOrderTime = (value: unknown) => {
   const raw = String(value || "").trim();
   if (!raw || raw === "Unknown Date") return null;

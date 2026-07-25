@@ -45,6 +45,7 @@ import {
   getBoxName,
   getLinkedGroup,
   getOtherLinkedOrder,
+  isSameCustomer,
 } from "@/lib/order-utils";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { sendNotification } from "@/lib/notifications";
@@ -507,6 +508,18 @@ const OrderListView: React.FC<OrderListViewProps> = ({
       .filter((o) => selectedOrders.has(`${o.id}-${o.sheet_name}`))
       .sort((a, b) => Number(a.id) - Number(b.id));
     if (selectedObjArray.length === 0) {
+      setIsLinking(false);
+      return;
+    }
+    // Orders may only be linked when they belong to the same customer (same
+    // phone or same name) - this is what stopped unrelated orders from
+    // accidentally getting merged together.
+    const reference = selectedObjArray[0];
+    const mismatched = selectedObjArray.find((o) => !isSameCustomer(reference, o));
+    if (mismatched) {
+      alert(
+        "These orders can't be linked: they don't share the same phone number or customer name.",
+      );
       setIsLinking(false);
       return;
     }
