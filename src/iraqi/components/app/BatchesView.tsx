@@ -46,6 +46,7 @@ import {
   getLinkedGroup,
   uploadToImgBB,
 } from "@/iraqi/lib/order-utils";
+import { toast } from "sonner";
 import { fetchWithRetry } from "@/iraqi/lib/fetchWithRetry";
 import { getWarningImageSource } from "@/lib/warning-image";
 import { parseBoxLinkMedia, serializeBoxLinkMedia } from "@/lib/box-link-media";
@@ -307,6 +308,13 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
 
   useEffect(() => {
     refreshBoxLinks();
+  }, [refreshBoxLinks]);
+
+  // Pick up a box link added on another device/role within seconds, instead
+  // of only ever refreshing on mount or after this device's own save.
+  useEffect(() => {
+    window.addEventListener("box-link:refresh", refreshBoxLinks);
+    return () => window.removeEventListener("box-link:refresh", refreshBoxLinks);
   }, [refreshBoxLinks]);
 
   const markSplitManual = useCallback((boxName: string, field: "lost" | "profit") => {
@@ -612,34 +620,34 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         if (json?.status !== "success") throw new Error(json?.message || "Could not save box link");
         if (Array.isArray(json.box_links)) setBoxLinks(json.box_links);
         else await refreshBoxLinks();
-        const alerts: Promise<unknown>[] = [];
+        toast.success(`Saved for ${box.box_name}`);
+        // The box link itself is already saved at this point - close the
+        // panel and clear the saving state right away instead of making the
+        // user stare at a spinner through the notification round-trip
+        // (add_notification, then the phone-push pipeline). Notifications
+        // still send, just in the background, not on the critical path.
+        setOpenBoxLinkBox(null);
         const notificationTargets = getOtherBoxLinkTargets(role);
         if (totalLinkWasAddedOrChanged) {
-          alerts.push(
-            sendNotification(
-              "link",
-              `Total Link added for ${box.box_name} by ${actor}.`,
-              role,
-              undefined,
-              false,
-              notificationTargets,
-            ),
-          );
+          sendNotification(
+            "link",
+            `Total Link added for ${box.box_name} by ${actor}.`,
+            role,
+            undefined,
+            false,
+            notificationTargets,
+          ).catch((error) => console.error("Total link notification failed", error));
         }
         if (newWarningCount > 0) {
-          alerts.push(
-            sendNotification(
-              "warning",
-              `${newWarningCount} Warning picture${newWarningCount === 1 ? "" : "s"} added for ${box.box_name} by ${actor}.`,
-              role,
-              undefined,
-              true,
-              notificationTargets,
-            ),
-          );
+          sendNotification(
+            "warning",
+            `${newWarningCount} Warning picture${newWarningCount === 1 ? "" : "s"} added for ${box.box_name} by ${actor}.`,
+            role,
+            undefined,
+            true,
+            notificationTargets,
+          ).catch((error) => console.error("Warning picture notification failed", error));
         }
-        if (alerts.length > 0) await Promise.allSettled(alerts);
-        setOpenBoxLinkBox(null);
       } catch (e) {
         console.error(e);
         alert(e instanceof Error ? e.message : "Failed to save box link");
@@ -653,7 +661,10 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   const copyBoxTotalLink = useCallback((link: string) => {
     const safeLink = toSafeUrl(link);
     if (!safeLink) return;
-    navigator.clipboard.writeText(safeLink);
+    navigator.clipboard
+      .writeText(safeLink)
+      .then(() => toast.success("Link copied"))
+      .catch(() => toast.error("Could not copy link"));
   }, []);
 
   const downloadBoxImage = useCallback(

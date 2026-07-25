@@ -69,6 +69,13 @@ const NotificationsDropdown: React.FC<NotificationsDropdownProps> = ({
         // Only toast if this is not the first load (prev > 0) OR if we want to toast on load (we generally don't, but let's do it if the alert was just generated)
         // Let's filter newly generated alerts within the last 15 seconds
         const now = Date.now();
+        // A "link" notification means a box's Total Link/pictures changed on
+        // some other device - tell any open BatchesView to refresh its box
+        // links so the box icon turns green there too, without the viewer
+        // having to reload the page.
+        if (newNots.some((n) => n.type === "link")) {
+          window.dispatchEvent(new CustomEvent("box-link:refresh"));
+        }
         newNots.forEach((n) => {
           const isRecent = now - new Date(n.timestamp).getTime() < 15000;
           // If it's a recent notification and we aren't the sender
