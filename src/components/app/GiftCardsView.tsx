@@ -29,10 +29,16 @@ interface GiftCardsViewProps {
 const CARD_PRICES = [100, 300, 500, 800, 1000];
 const PAYMENT_OPTIONS = ["Zaincash", "Qi card", "Other"];
 const LOCAL_GIFT_CARDS_KEY = "kurdistani_gift_cards_cache";
+const LOCAL_GIFT_CARD_TS_KEY = "kurdistani_gift_cards_cache_ts";
 const LOCAL_GIFT_CARD_RATES_KEY = "kurdistani_gift_card_iqd_rates";
 const LOCAL_GIFT_CARD_BOX_PRICES_KEY = "kurdistani_gift_card_box_prices";
 const LOCAL_GIFT_CARD_BOX_LOSSES_KEY = "kurdistani_gift_card_box_losses";
 const DEFAULT_IQD_RATES = { Zaincash: 401865, "Qi card": 419250 };
+// A local write is only trusted over the server's own copy of a card for this
+// long. After that, the server (shared across every device) wins, so a card
+// edited/spent on one device can't stay permanently stuck showing a stale
+// snapshot on another device once the background sync has had time to land.
+const RECENT_OPTIMISTIC_MS = 15000;
 
 const money = (value: number) => `$${Number(value || 0).toLocaleString()}`;
 const iqdMoney = (value: number) => `${Math.round(Number(value || 0)).toLocaleString()} IQD`;
@@ -79,6 +85,19 @@ const readLocalGiftCards = (): GiftCard[] => {
     return [];
   }
 };
+const readLocalTimestamps = (): Record<string, number> => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_GIFT_CARD_TS_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+};
+const touchLocalTimestamp = (id: string) => {
+  const timestamps = readLocalTimestamps();
+  timestamps[id] = Date.now();
+  localStorage.setItem(LOCAL_GIFT_CARD_TS_KEY, JSON.stringify(timestamps));
+};
 const writeLocalGiftCard = (card: GiftCard) => {
   const cards = readLocalGiftCards();
   const next = [
@@ -90,6 +109,7 @@ const writeLocalGiftCard = (card: GiftCard) => {
     ),
   ];
   localStorage.setItem(LOCAL_GIFT_CARDS_KEY, JSON.stringify(next));
+  touchLocalTimestamp(card.id);
 };
 const updateLocalGiftCard = (id: string, updater: (card: GiftCard) => GiftCard) => {
   const cards = readLocalGiftCards();
@@ -97,6 +117,7 @@ const updateLocalGiftCard = (id: string, updater: (card: GiftCard) => GiftCard) 
     LOCAL_GIFT_CARDS_KEY,
     JSON.stringify(cards.map((card) => (card.id === id ? updater(card) : card))),
   );
+  touchLocalTimestamp(id);
 };
 const saveLocalGiftCardUpdate = (card: GiftCard, updater: (card: GiftCard) => GiftCard) => {
   const cards = readLocalGiftCards();
@@ -105,6 +126,7 @@ const saveLocalGiftCardUpdate = (card: GiftCard, updater: (card: GiftCard) => Gi
     ? cards.map((saved) => (saved.id === card.id ? updater(saved) : saved))
     : [updater(card), ...cards];
   localStorage.setItem(LOCAL_GIFT_CARDS_KEY, JSON.stringify(next));
+  touchLocalTimestamp(card.id);
 };
 const readBoxPrices = (): Record<string, number> => {
   try {
@@ -186,14 +208,31 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   }, [giftCards]);
 
   const displayedCards = useMemo(() => {
-    const merged = [...localCards];
-    for (const serverCard of giftCards) {
-      const exists = merged.some(
+    // Server data (shared by every device) always wins once a local edit has
+    // had time to sync — otherwise a card touched on one device stays pinned
+    // to that device's own stale snapshot forever, even after other devices
+    // update it. Local data only fills in (a) brand-new cards the server
+    // doesn't know about yet, or (b) an edit still inside its brief
+    // optimistic window, so this device's own action still feels instant.
+    const timestamps = readLocalTimestamps();
+    const now = Date.now();
+    const isRecent = (id: string) => now - (timestamps[id] || 0) < RECENT_OPTIMISTIC_MS;
+    const findLocalMatch = (serverCard: GiftCard) =>
+      localCards.find(
         (card) =>
           card.id === serverCard.id ||
           (card.card_number === serverCard.card_number && card.card_pin === serverCard.card_pin),
       );
-      if (!exists) merged.push(serverCard);
+
+    const usedLocalIds = new Set<string>();
+    const merged = giftCards.map((serverCard) => {
+      const localMatch = findLocalMatch(serverCard);
+      if (!localMatch) return serverCard;
+      usedLocalIds.add(localMatch.id);
+      return isRecent(localMatch.id) ? localMatch : serverCard;
+    });
+    for (const localCard of localCards) {
+      if (!usedLocalIds.has(localCard.id)) merged.push(localCard);
     }
     return sortGiftCardsByBalance(merged);
   }, [giftCards, localCards]);
