@@ -557,6 +557,17 @@ const OrderListView: React.FC<OrderListViewProps> = ({
           });
         });
       }
+      const names = selectedObjArray
+        .map((o) => o.name || o.insta || `#${o.id}`)
+        .slice(0, 4)
+        .join(", ");
+      sendNotification(
+        "link",
+        `${selectedObjArray.length} orders linked together: ${names}${selectedObjArray.length > 4 ? "..." : ""}`,
+        role ?? null,
+        selectedObjArray[0],
+      );
+
       setSelectedOrders(new Set());
       setIsSelectMode(false);
       alert("Orders linked successfully. The system will sync the latest data automatically.");
