@@ -1,254 +1,200 @@
-import React, { useState, useEffect } from 'react';
-import type { Worker } from 'tesseract.js';
-import { Calculator, Upload, Copy, Check, X } from 'lucide-react';
-import { calculatorStore, CalculatorState } from '@/lib/calculatorStore';
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { Calculator, CheckCircle2, Circle, Layers3, RotateCcw, X } from "lucide-react";
 
-const EXCHANGE_RATE = 1180;
-const PROMO_MULTIPLIER = 0.6;
-
-let workerPromise: Promise<Worker> | null = null;
-const getWorker = () => {
-  if (!workerPromise) {
-    workerPromise = import('tesseract.js').then(({ default: Tesseract }) =>
-      Tesseract.createWorker('eng')
-    );
-  }
-  return workerPromise;
+type MonthlyCount = {
+  count?: number;
 };
-
-export function GlobalCalculatorButton({ onOpenPriceCalc }: { onOpenPriceCalc?: () => void }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const handleClick = () => {
-    if (onOpenPriceCalc) {
-      onOpenPriceCalc();
-      return;
-    }
-    setIsOpen(true);
-  };
-
-  return (
-    <>
-      <button
-        onClick={handleClick}
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary to-primary/80 rounded-full shadow-lg flex items-center justify-center text-primary-foreground hover:shadow-xl hover:scale-105 active:scale-95 transition-all"
-        title="Price Calc"
-      >
-        <Calculator size={24} />
-      </button>
-
-      {isOpen && <GlobalCalculator onClose={() => setIsOpen(false)} />}
-    </>
-  );
-}
 
 interface GlobalCalculatorProps {
   onClose: () => void;
+  monthlyStats?: Record<string, MonthlyCount>;
+  monthOptions?: string[];
+  yearLabel?: string;
 }
 
-export function GlobalCalculator({ onClose }: GlobalCalculatorProps) {
-  const initialState = calculatorStore.getState();
-  const [state, setState] = useState<CalculatorState>({ 
-    ...initialState, 
-    activeTab: 'auto' // Always start on auto/image upload tab
-  });
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+const uniqueMonths = (months: string[]) => [...new Set(months.filter(Boolean))];
+
+export function GlobalCalculator({
+  onClose,
+  monthlyStats = {},
+  monthOptions = [],
+  yearLabel,
+}: GlobalCalculatorProps) {
+  const months = useMemo(() => {
+    const statMonths = Object.keys(monthlyStats);
+    const scopedMonths = monthOptions.length > 0 ? monthOptions : statMonths;
+    return uniqueMonths(scopedMonths).filter(
+      (month) => monthOptions.length > 0 || (monthlyStats[month]?.count || 0) > 0,
+    );
+  }, [monthOptions, monthlyStats]);
+
+  const defaultSelected = useMemo(
+    () => months.filter((month) => (monthlyStats[month]?.count || 0) > 0),
+    [months, monthlyStats],
+  );
+  const [selected, setSelected] = useState<string[]>(defaultSelected);
+
+  const selectedSet = new Set(selected);
+  const totalOrders = selected.reduce((sum, month) => sum + (monthlyStats[month]?.count || 0), 0);
+  const allSelected = months.length > 0 && selected.length === months.length;
+  const hasMonths = months.length > 0;
 
   useEffect(() => {
-    const handleStateChange = (e: CustomEvent) => {
-      setState(prev => ({ ...e.detail, activeTab: 'auto' })); // Keep on auto tab
-    };
-    window.addEventListener('calculator-state-changed', handleStateChange as EventListener);
-    getWorker().catch(console.error);
-    return () => {
-      window.removeEventListener('calculator-state-changed', handleStateChange as EventListener);
-    };
-  }, []);
+    setSelected(defaultSelected);
+  }, [defaultSelected]);
 
-  const updateState = (updates: Partial<CalculatorState>) => {
-    const newState = { ...state, ...updates };
-    setState(newState);
-    calculatorStore.setState(newState);
+  const toggleMonth = (month: string) => {
+    setSelected((prev) =>
+      prev.includes(month) ? prev.filter((item) => item !== month) : [...prev, month],
+    );
   };
 
-  const calculateResults = (retail: number, promo: number) => {
-    const adjustedPromo = promo * PROMO_MULTIPLIER;
-    const totalUsd = retail - adjustedPromo;
-    const totalIqd = totalUsd * EXCHANGE_RATE;
-    
-    return {
-      adjustedPromo,
-      totalUsd: Math.max(0, totalUsd),
-      totalIqd: Math.max(0, totalIqd)
-    };
-  };
+  if (typeof document === "undefined") return null;
 
-  const processImage = async (file: File) => {
-    try {
-      updateState({ autoRetail: null, autoPromo: null, autoItems: null });
-      
-      const imgObj = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const i = new Image();
-        i.onload = () => resolve(i);
-        i.onerror = reject;
-        i.src = URL.createObjectURL(file);
-      });
-      
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error("No canvas context");
-      
-      const scale = Math.min(1, 800 / imgObj.width);
-      canvas.width = imgObj.width * scale;
-      canvas.height = imgObj.height * scale;
-      ctx.drawImage(imgObj, 0, 0, canvas.width, canvas.height);
-      
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i+1];
-        const b = data[i+2];
-        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-        const isText = lum < 160 || (r > 150 && g < 140 && b < 100);
-        const val = isText ? 0 : 255;
-        data[i] = val;
-        data[i+1] = val;
-        data[i+2] = val;
-      }
-      ctx.putImageData(imgData, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
-
-      const worker = await getWorker();
-      const result = await worker.recognize(dataUrl);
-      const text = result.data.text;
-      
-      let extractedRetail = 0;
-      let extractedPromo = 0;
-      let extractedItems = 0;
-
-      const dollarMatches = text.match(/\$[\d.,]+/g) || [];
-      if (dollarMatches.length >= 2) {
-        extractedRetail = parseFloat(dollarMatches[0].replace(/[$,]/g, ''));
-        extractedPromo = parseFloat(dollarMatches[1].replace(/[$,]/g, ''));
-      }
-
-      const numberMatches = text.match(/\d+/g) || [];
-      if (numberMatches.length > 0) {
-        extractedItems = parseInt(numberMatches[numberMatches.length - 1]);
-      }
-
-      const dataUrl2 = canvas.toDataURL('image/jpeg', 0.7);
-      updateState({
-        autoImage: dataUrl2,
-        autoRetail: extractedRetail || undefined,
-        autoPromo: extractedPromo || undefined,
-        autoItems: extractedItems || undefined,
-      });
-    } catch (error) {
-      console.error('Image processing error:', error);
-    }
-  };
-
-  const handleManualCalculate = () => {
-    const retail = parseFloat(state.manualRetail);
-    const promo = parseFloat(state.manualPromo);
-    if (!isNaN(retail) && !isNaN(promo)) {
-      const results = calculateResults(retail, promo);
-      updateState({
-        autoRetail: results.totalUsd,
-        autoPromo: results.adjustedPromo,
-        autoItems: parseInt(state.manualItems) || undefined,
-        activeTab: 'auto'
-      });
-    }
-  };
-
-  const handleCopy = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    setCopyFeedback(type);
-    setTimeout(() => setCopyFeedback(null), 2000);
-  };
-
-  const results = state.autoRetail !== null && state.autoPromo !== null 
-    ? calculateResults(state.autoRetail, state.autoPromo)
-    : null;
-
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+      className="fixed inset-0 z-[9999] flex items-stretch justify-center bg-background sm:items-center sm:bg-black/55 sm:p-3"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto"
+        className="flex h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-background sm:h-[min(680px,calc(100dvh-24px))] sm:max-w-lg sm:rounded-2xl sm:border sm:border-border sm:bg-card sm:shadow-2xl"
       >
-        <div className="p-6 border-b border-border flex items-center justify-between sticky top-0 bg-card/95 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-lg text-primary"><Calculator size={18} /></div>
-            <h2 className="text-xl font-bold">Global Calculator</h2>
+        <div className="shrink-0 border-b border-border bg-card/95 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur flex items-center justify-between sm:py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="h-9 w-9 shrink-0 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shadow-sm">
+              <Calculator size={18} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-black tracking-tight">Order total</h2>
+              <p className="text-xs text-muted-foreground">
+                Choose {yearLabel ? `${yearLabel} ` : ""}months to count
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 w-9 rounded-xl border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center transition-colors"
+            aria-label="Close calculator"
+          >
+            <X size={19} />
+          </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Price Calculation Section */}
-          <div className="space-y-4">
-            <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) {
-                    processImage(e.target.files[0]);
-                  }
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
+          <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/15 via-primary/8 to-card p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-black uppercase text-primary tracking-[0.14em]">
+                  Total orders
+                </div>
+                <div className="mt-1 text-4xl font-black tracking-tight text-foreground sm:text-5xl">
+                  {totalOrders.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-xl border border-primary/20 bg-background/70 px-3 py-2 text-right">
+                <div className="text-lg font-black leading-none">{selected.length}</div>
+                <div className="mt-1 text-[10px] font-bold uppercase text-muted-foreground">
+                  Months
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-background/70">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{
+                  width: hasMonths
+                    ? `${Math.round((selected.length / months.length) * 100)}%`
+                    : "0%",
                 }}
-                className="hidden"
               />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                <Upload size={16} />
-                Upload Receipt Image
-              </button>
-              <p className="text-sm text-muted-foreground mt-2">Upload a receipt to calculate price</p>
             </div>
           </div>
 
-          {/* Results */}
-          {state.autoRetail !== null && results && (
-            <div className="space-y-3 p-4 bg-secondary rounded-lg border border-border">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Total (USD)</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-lg">${results.totalUsd.toFixed(2)}</span>
-                  <button
-                    onClick={() => handleCopy(results.totalUsd.toFixed(2), 'usd')}
-                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {copyFeedback === 'usd' ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Total (IQD)</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-lg">{results.totalIqd.toLocaleString()}</span>
-                  <button
-                    onClick={() => handleCopy(results.totalIqd.toLocaleString(), 'iqd')}
-                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {copyFeedback === 'iqd' ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected(allSelected ? [] : months)}
+              className="flex items-center justify-center gap-2 rounded-xl border border-border bg-secondary px-3 py-2.5 text-xs font-black hover:bg-secondary/80 transition-colors"
+            >
+              <Layers3 size={15} />
+              {allSelected ? "Unselect all" : "Select all"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(defaultSelected)}
+              className="flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-black hover:bg-secondary transition-colors"
+            >
+              <RotateCcw size={15} />
+              Active months
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-border overflow-hidden bg-background">
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-muted-foreground">
+                Months
+              </span>
+              <span className="text-xs font-bold text-muted-foreground">
+                {selected.length} / {months.length}
+              </span>
             </div>
-          )}
+
+            {!hasMonths ? (
+              <div className="p-5 text-center text-sm text-muted-foreground">
+                No month data found.
+              </div>
+            ) : (
+              months.map((month) => {
+                const checked = selectedSet.has(month);
+                const count = monthlyStats[month]?.count || 0;
+                return (
+                  <button
+                    key={month}
+                    type="button"
+                    onClick={() => toggleMonth(month)}
+                    className={`flex w-full items-center justify-between border-b border-border px-3 py-3 text-left last:border-b-0 transition-colors ${
+                      checked ? "bg-primary/10" : "bg-background hover:bg-secondary/70"
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      {checked ? (
+                        <CheckCircle2 size={18} className="shrink-0 text-primary" />
+                      ) : (
+                        <Circle size={18} className="shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate text-sm font-black">{month}</span>
+                    </span>
+                    <span
+                      className={`ml-3 rounded-full px-2.5 py-1 text-xs font-black ${
+                        checked
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-muted-foreground"
+                      }`}
+                    >
+                      {count.toLocaleString()}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t border-border bg-card/95 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] sm:py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-black text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Done
+          </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

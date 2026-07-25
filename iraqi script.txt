@@ -10,18 +10,288 @@
 // - Linked Orders mapped logically in Column AB (28) (NO PHYSICAL MERGING)
 // - V: Primary Pic, W: Proof Pic, X: Proof URL, Y: Warning Pic, AA: Primary URL
 
-var ACTIVE_SHEET_NAME = "Jun"; // <--- CHANGE THIS MONTHLY[cite: 1]
+var ACTIVE_SHEET_NAME = "July"; // <--- CHANGE THIS MONTHLY[cite: 1]
 
 // 2. LOCAL SHEETS
 var LOCAL_SHEETS = ["Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"]; //
 var MAX_ROW_LIMIT = 500; //
+var SETTINGS_SHEET_NAME = "Settings"; //
+var ACTIVE_SHEET_SETTING_KEY = "active_sheet"; //
+var GIFT_CARD_SHEET_NAME = "GiftCards"; //
+var BOX_LINK_SHEET_NAME = "Box Link"; //
+
+function getActiveSheetName() {
+  return ACTIVE_SHEET_NAME;
+}
+
+function getOrderSheetNames() {
+  var names = LOCAL_SHEETS.slice();
+  var activeSheetName = getActiveSheetName();
+  if (activeSheetName && names.indexOf(activeSheetName) === -1) {
+    names.unshift(activeSheetName);
+  }
+  return names;
+}
+
+function getOrCreateGiftCardSheet(ss) {
+  var sheet = ss.getSheetByName(GIFT_CARD_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(GIFT_CARD_SHEET_NAME);
+  var headers = ["ID", "Date", "Card Number", "Card Pin", "Payment Method", "Payment Other", "Card Price", "Spent", "Remaining", "Linked Boxes", "Notes"];
+  var existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var needsHeader = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (existing[i] !== headers[i]) { needsHeader = true; break; }
+  }
+  if (needsHeader) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sheet;
+}
+
+function parseMoneyValue(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  var parsed = parseFloat(value.toString().replace(/[^0-9.-]+/g, ""));
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+function parseGiftCardLinkedBoxes(value) {
+  if (!value) return [];
+  return value.toString().split(",").map(function(box) { return box.trim(); }).filter(function(box) { return box; });
+}
+
+function sortGiftCardsByBalance(cards) {
+  return cards.map(function(card, index) {
+    return { card: card, index: index };
+  }).sort(function(a, b) {
+    var aHasBalance = (parseFloat(a.card.remaining) || 0) > 0 ? 1 : 0;
+    var bHasBalance = (parseFloat(b.card.remaining) || 0) > 0 ? 1 : 0;
+    return (bHasBalance - aHasBalance) || (a.index - b.index);
+  }).map(function(item) {
+    return item.card;
+  });
+}
+
+function readGiftCards(ss) {
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+  var cards = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (!r[0]) continue;
+    cards.push({
+      id: r[0].toString(),
+      date: r[1] ? r[1].toString() : "",
+      card_number: r[2] ? r[2].toString() : "",
+      card_pin: r[3] ? r[3].toString() : "",
+      payment_method: r[4] ? r[4].toString() : "",
+      payment_other: r[5] ? r[5].toString() : "",
+      card_price: parseFloat(r[6]) || 0,
+      spent: parseFloat(r[7]) || 0,
+      remaining: parseFloat(r[8]) || 0,
+      linked_boxes: parseGiftCardLinkedBoxes(r[9]),
+      notes: r[10] ? r[10].toString() : ""
+    });
+  }
+  return sortGiftCardsByBalance(cards.reverse());
+}
+
+function findGiftCardRow(sheet, id) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] && values[i][0].toString() === id.toString()) return i + 2;
+  }
+  return -1;
+}
+
+function saveGiftCard(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var price = parseFloat(data.card_price) || 300;
+  var id = Utilities.getUuid();
+  var date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  sheet.appendRow([
+    id,
+    date,
+    data.card_number || "",
+    data.card_pin || "",
+    data.payment_method || "",
+    data.payment_other || "",
+    price,
+    0,
+    price,
+    "",
+    data.notes || ""
+  ]);
+  return { status: "success", id: id };
+}
+
+function spendGiftCard(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var row = findGiftCardRow(sheet, data.id || "");
+  if (row < 2) return { status: "error", message: "Gift card not found" };
+  var amount = parseFloat(data.amount) || 0;
+  if (amount === 0) return { status: "error", message: "Invalid amount" };
+  var price = parseFloat(sheet.getRange(row, 7).getValue()) || 300;
+  var spent = parseFloat(sheet.getRange(row, 8).getValue()) || 0;
+  var nextSpent = Math.max(spent + amount, 0);
+  var nextRemaining = Math.max(price - nextSpent, 0);
+  sheet.getRange(row, 8).setValue(nextSpent);
+  sheet.getRange(row, 9).setValue(nextRemaining);
+  return { status: "success", spent: nextSpent, remaining: nextRemaining };
+}
+
+function linkGiftCardBox(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var row = findGiftCardRow(sheet, data.id || "");
+  if (row < 2) return { status: "error", message: "Gift card not found" };
+  var boxName = (data.box_name || "").toString().trim();
+  var sheetName = (data.sheet_name || data.sheet || getActiveSheetName()).toString().trim();
+  if (!boxName) return { status: "error", message: "Missing box name" };
+  var boxKey = sheetName + ":" + boxName;
+  var linked = parseGiftCardLinkedBoxes(sheet.getRange(row, 10).getValue());
+  if (linked.indexOf(boxKey) === -1) linked.push(boxKey);
+  sheet.getRange(row, 10).setValue(linked.join(","));
+  return { status: "success", linked_boxes: linked };
+}
+
+function canManageBoxLinkRole(role) {
+  var cleanRole = (role || "").toString().toLowerCase();
+  return cleanRole === "owner" || cleanRole === "admin";
+}
+
+function getOrCreateBoxLinkSheet(ss) {
+  var sheet = ss.getSheetByName(BOX_LINK_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(BOX_LINK_SHEET_NAME);
+  var headers = ["ID", "Sheet Name", "Box Name", "Total Link", "Picture", "Picture URL", "Updated At", "Updated By", "Updated Role"];
+  var existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var needsHeader = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (existing[i] !== headers[i]) { needsHeader = true; break; }
+  }
+  if (needsHeader) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  try {
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#dbeafe");
+    sheet.autoResizeColumns(1, headers.length);
+  } catch(e) {}
+  return sheet;
+}
+
+function readBoxLinks(ss) {
+  var sheet = getOrCreateBoxLinkSheet(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  var links = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (!r[0] && !r[2]) continue;
+    links.push({
+      id: r[0] ? r[0].toString() : "",
+      sheet_name: r[1] ? r[1].toString() : "",
+      box_name: r[2] ? r[2].toString() : "",
+      total_link: r[3] ? r[3].toString() : "",
+      image_url: r[5] ? r[5].toString() : "",
+      updated_at: r[6] ? r[6].toString() : "",
+      updated_by: r[7] ? r[7].toString() : "",
+      updated_role: r[8] ? r[8].toString() : ""
+    });
+  }
+  return links;
+}
+
+function findBoxLinkRow(sheet, sheetName, boxName) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  var values = sheet.getRange(2, 2, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if ((values[i][0] || "").toString() === sheetName && (values[i][1] || "").toString() === boxName) return i + 2;
+  }
+  return -1;
+}
+
+function saveBoxLink(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateBoxLinkSheet(ss);
+  var sheetName = (data.sheet_name || data.sheet || getActiveSheetName()).toString().trim();
+  var boxName = (data.box_name || "").toString().trim();
+  if (!boxName) return { status: "error", message: "Missing box name" };
+  var totalLink = (data.total_link || data.totalLink || "").toString().trim();
+  var imageUrl = (data.image_url || data.imageUrl || "").toString().trim();
+  var updatedAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  var updatedBy = (data.updated_by || data.admin_name || data.submitted_by || "").toString();
+  var updatedRole = (data.role || data.updated_role || "").toString();
+  var row = findBoxLinkRow(sheet, sheetName, boxName);
+  var id = row > 1 ? sheet.getRange(row, 1).getValue().toString() : Utilities.getUuid();
+  if (row < 2) {
+    sheet.appendRow([id, sheetName, boxName, totalLink, "", imageUrl, updatedAt, updatedBy, updatedRole]);
+    row = sheet.getLastRow();
+  } else {
+    sheet.getRange(row, 1, 1, 9).setValues([[id, sheetName, boxName, totalLink, "", imageUrl, updatedAt, updatedBy, updatedRole]]);
+  }
+  if (imageUrl) {
+    sheet.getRange(row, 5).setFormula('=IMAGE("' + imageUrl.replace(/"/g, '""') + '")');
+  } else {
+    sheet.getRange(row, 5).clearContent();
+  }
+  return { status: "success", box_link: { id: id, sheet_name: sheetName, box_name: boxName, total_link: totalLink, image_url: imageUrl, updated_at: updatedAt, updated_by: updatedBy, updated_role: updatedRole }, box_links: readBoxLinks(ss) };
+}
+
+function boxLinkJsonResponse(result) {
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleBoxLinkAction(data) {
+  var action = (data.action || "").toString().trim();
+  if (["get_box_links", "save_box_link"].indexOf(action) === -1) return null;
+  if (!canManageBoxLinkRole(data.role)) {
+    return boxLinkJsonResponse({ status: "error", message: "Owner/Admin only" });
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (action === "get_box_links") return boxLinkJsonResponse({ status: "success", box_links: readBoxLinks(ss) });
+  return boxLinkJsonResponse(saveBoxLink(data));
+}
+
+function setActiveSheetName(sheetName) {
+  var cleanSheetName = (sheetName || "").toString().trim();
+  if (LOCAL_SHEETS.indexOf(cleanSheetName) === -1) {
+    return { status: "error", message: "Invalid month: " + cleanSheetName };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settings = ss.getSheetByName(SETTINGS_SHEET_NAME);
+  if (!settings) {
+    settings = ss.insertSheet(SETTINGS_SHEET_NAME);
+    settings.getRange(1, 1, 1, 2).setValues([[ACTIVE_SHEET_SETTING_KEY, cleanSheetName]]);
+    return { status: "success", active_sheet: cleanSheetName };
+  }
+
+  var lastRow = Math.max(settings.getLastRow(), 1);
+  var values = settings.getRange(1, 1, lastRow, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if ((values[i][0] || "").toString().trim() === ACTIVE_SHEET_SETTING_KEY) {
+      settings.getRange(i + 1, 2).setValue(cleanSheetName);
+      return { status: "success", active_sheet: cleanSheetName };
+    }
+  }
+
+  settings.getRange(lastRow + 1, 1, 1, 2).setValues([[ACTIVE_SHEET_SETTING_KEY, cleanSheetName]]);
+  return { status: "success", active_sheet: cleanSheetName };
+}
 
 // STATUS COLOR MAP
 var STATUS_COLOR_MAP = {
   "arrived": "#dcfce7",
+  "in_warehouse": "#ccfbf1",
+  "in_transit": "#ede9fe",
+  "purchased": "#dbeafe",
+  "pending": null,
   "cancelled": "#fee2e2",
   "approved": "#dbeafe",
-  "pending": null,
   "match": "#dcfce7",
   "mismatch": null,
   "missing": "#fed7aa"
@@ -35,6 +305,266 @@ function applyStatusColor(sheet, rowId, statusKey) {
   try { sheet.getRangeList(ranges).setBackground(color); } catch (e) {} //
 }
 
+function parseLinkedRowIds(value, sheetName) {
+  var input = value;
+  if (input === null || input === undefined || input === "") return [];
+  if (typeof input === "string") {
+    var trimmed = input.trim();
+    if (trimmed.charAt(0) === "[") {
+      try { input = JSON.parse(trimmed); } catch(e) { input = trimmed.split(","); }
+    } else {
+      input = trimmed.split(",");
+    }
+  }
+  if (!Array.isArray(input)) input = [input];
+
+  var seen = {};
+  var ids = [];
+  for (var i = 0; i < input.length; i++) {
+    var token = (input[i] || "").toString().trim();
+    if (!token) continue;
+    var rowPart = token;
+    if (token.indexOf(":") > -1) {
+      var parts = token.split(":");
+      rowPart = parts[0];
+      var tokenSheet = parts.slice(1).join(":").trim();
+      if (tokenSheet && sheetName && tokenSheet !== sheetName) continue;
+    }
+    var rowId = parseInt(rowPart, 10);
+    if (!isNaN(rowId) && rowId >= 4 && rowId <= MAX_ROW_LIMIT && !seen[rowId]) {
+      seen[rowId] = true;
+      ids.push(rowId);
+    }
+  }
+  ids.sort(function(a, b) { return a - b; });
+  return ids;
+}
+
+function parseLinkedCellTokens(value) {
+  var input = value;
+  if (input === null || input === undefined || input === "") return [];
+  if (typeof input === "string") {
+    var trimmed = input.trim();
+    if (trimmed.charAt(0) === "[") {
+      try { input = JSON.parse(trimmed); } catch(e) { input = trimmed.split(","); }
+    } else {
+      input = trimmed.split(",");
+    }
+  }
+  if (!Array.isArray(input)) input = [input];
+
+  var seen = {};
+  var tokens = [];
+  for (var i = 0; i < input.length; i++) {
+    var token = (input[i] || "").toString().trim();
+    if (!token || seen[token]) continue;
+    seen[token] = true;
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function getOrderSheetByName(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName(sheetName);
+}
+
+function normalizeOrderRef(rowId, sheetName) {
+  return parseInt(rowId, 10) + ":" + sheetName;
+}
+
+function writeOrderLinkRefs(sheet, rowId, refs) {
+  var seen = {};
+  var cleanRefs = [];
+  for (var i = 0; i < refs.length; i++) {
+    var ref = (refs[i] || "").toString().trim();
+    if (!ref || seen[ref]) continue;
+    seen[ref] = true;
+    cleanRefs.push(ref);
+  }
+  if (cleanRefs.length > 0) sheet.getRange(parseInt(rowId, 10), 28).setValue(cleanRefs.join(","));
+  else sheet.getRange(parseInt(rowId, 10), 28).clearContent();
+}
+
+function parseOrderLinkRefs(value, fallbackSheetName) {
+  var tokens = parseLinkedCellTokens(value || []);
+  var refs = [];
+  var seen = {};
+  for (var i = 0; i < tokens.length; i++) {
+    var token = (tokens[i] || "").toString().replace(/^!/, "").trim();
+    if (!token) continue;
+    var parts = token.split(":");
+    var row = parseInt(parts[0], 10);
+    var sheetName = parts.length > 1 ? parts.slice(1).join(":").trim() : fallbackSheetName;
+    if (!row || row < 4 || row > MAX_ROW_LIMIT || !sheetName) continue;
+    var key = normalizeOrderRef(row, sheetName);
+    if (seen[key]) continue;
+    seen[key] = true;
+    refs.push({ row: row, sheetName: sheetName, key: key });
+  }
+  return refs;
+}
+
+function getCompleteLinkedRefs(seedRefs) {
+  var queue = parseOrderLinkRefs(seedRefs || [], "");
+  var seen = {};
+  for (var i = 0; i < queue.length; i++) seen[queue[i].key] = true;
+
+  var index = 0;
+  while (index < queue.length) {
+    var current = queue[index++];
+    var sheet = getOrderSheetByName(current.sheetName);
+    if (!sheet) continue;
+    var linkedValue = "";
+    try { linkedValue = sheet.getRange(current.row, 28).getValue().toString(); } catch(e) {}
+    var linkedRefs = parseOrderLinkRefs(linkedValue, current.sheetName);
+    for (var j = 0; j < linkedRefs.length; j++) {
+      if (!seen[linkedRefs[j].key]) {
+        seen[linkedRefs[j].key] = true;
+        queue.push(linkedRefs[j]);
+      }
+    }
+  }
+  return queue;
+}
+
+function relinkOrderRefs(targetRow, targetSheetName, linkedRefs) {
+  var targetRef = normalizeOrderRef(targetRow, targetSheetName);
+  var newGroup = parseOrderLinkRefs(linkedRefs || [], targetSheetName);
+  if (newGroup.filter(function(o) { return o.key === targetRef; }).length === 0) {
+    newGroup.push({ row: parseInt(targetRow, 10), sheetName: targetSheetName, key: targetRef });
+  }
+
+  var newKeys = {};
+  for (var i = 0; i < newGroup.length; i++) newKeys[newGroup[i].key] = true;
+
+  var oldGroups = [];
+  var affected = {};
+  var seeds = newGroup.slice();
+  seeds.push({ row: parseInt(targetRow, 10), sheetName: targetSheetName, key: targetRef });
+  for (var s = 0; s < seeds.length; s++) {
+    var group = getCompleteLinkedRefs([seeds[s].key]);
+    oldGroups.push(group);
+    for (var g = 0; g < group.length; g++) affected[group[g].key] = group[g];
+  }
+  for (var n = 0; n < newGroup.length; n++) affected[newGroup[n].key] = newGroup[n];
+
+  for (var key in affected) {
+    if (!affected.hasOwnProperty(key)) continue;
+    var current = affected[key];
+    var sheet = getOrderSheetByName(current.sheetName);
+    if (sheet) writeOrderLinkRefs(sheet, current.row, []);
+  }
+
+  for (var og = 0; og < oldGroups.length; og++) {
+    var remaining = oldGroups[og].filter(function(o) { return !newKeys[o.key]; });
+    if (remaining.length < 2) continue;
+    for (var r = 0; r < remaining.length; r++) {
+      var rem = remaining[r];
+      var remSheet = getOrderSheetByName(rem.sheetName);
+      if (!remSheet) continue;
+      writeOrderLinkRefs(remSheet, rem.row, remaining.filter(function(o) { return o.key !== rem.key; }).map(function(o) { return o.key; }));
+    }
+  }
+
+  if (newGroup.length > 1) {
+    for (var x = 0; x < newGroup.length; x++) {
+      var order = newGroup[x];
+      var orderSheet = getOrderSheetByName(order.sheetName);
+      if (!orderSheet) continue;
+      writeOrderLinkRefs(orderSheet, order.row, newGroup.filter(function(o) { return o.key !== order.key; }).map(function(o) { return o.key; }));
+    }
+  }
+}
+
+function getCompleteLinkedRows(sheet, seedRows, sheetName) {
+  var queue = parseLinkedRowIds(seedRows, sheetName);
+  var seen = {};
+  for (var i = 0; i < queue.length; i++) seen[queue[i]] = true;
+  var index = 0;
+  while (index < queue.length) {
+    var rowId = queue[index++];
+    var linkedValue = "";
+    try { linkedValue = sheet.getRange(rowId, 28).getValue().toString(); } catch(e) {}
+    var linkedRows = parseLinkedRowIds(linkedValue, sheetName);
+    for (var j = 0; j < linkedRows.length; j++) {
+      if (!seen[linkedRows[j]]) {
+        seen[linkedRows[j]] = true;
+        queue.push(linkedRows[j]);
+      }
+    }
+  }
+  queue.sort(function(a, b) { return a - b; });
+  return queue;
+}
+
+function writeLinkedGroup(sheet, rowIds) {
+  var ids = parseLinkedRowIds(rowIds, "");
+  if (ids.length === 0) return;
+  var linkedString = ids.join(",");
+  for (var i = 0; i < ids.length; i++) sheet.getRange(ids[i], 28).setValue(linkedString);
+}
+
+function clearLinkedGroup(sheet, rowIds) {
+  var ids = parseLinkedRowIds(rowIds, "");
+  for (var i = 0; i < ids.length; i++) sheet.getRange(ids[i], 28).clearContent();
+}
+
+function relinkOrderRow(sheet, targetRow, linkedRows, sheetName) {
+  var newGroup = parseLinkedRowIds(linkedRows, sheetName);
+  if (newGroup.indexOf(targetRow) === -1) newGroup.push(targetRow);
+  newGroup.sort(function(a, b) { return a - b; });
+
+  var groups = [getCompleteLinkedRows(sheet, [targetRow], sheetName)];
+  for (var i = 0; i < newGroup.length; i++) {
+    groups.push(getCompleteLinkedRows(sheet, [newGroup[i]], sheetName));
+  }
+
+  var affected = [];
+  for (var g = 0; g < groups.length; g++) {
+    for (var j = 0; j < groups[g].length; j++) {
+      if (affected.indexOf(groups[g][j]) === -1) affected.push(groups[g][j]);
+    }
+  }
+
+  clearLinkedGroup(sheet, affected);
+  for (var k = 0; k < groups.length; k++) {
+    var remaining = groups[k].filter(function(id) { return newGroup.indexOf(id) === -1; });
+    remaining.sort(function(a, b) { return a - b; });
+    if (remaining.length > 1) writeLinkedGroup(sheet, remaining);
+  }
+  if (newGroup.length > 1) writeLinkedGroup(sheet, newGroup);
+}
+
+function getNextOrderRow(sheet) {
+  var startRow = 4; //
+  var lastRowInSheet = sheet.getLastRow(); //
+  if (lastRowInSheet > MAX_ROW_LIMIT) lastRowInSheet = MAX_ROW_LIMIT; //
+  var targetRow = startRow; //
+  if (lastRowInSheet >= startRow) { //
+    var columnValues = sheet.getRange(startRow, 5, lastRowInSheet - startRow + 1, 1).getValues(); //
+    var maxIndex = -1; //
+    for (var i = 0; i < columnValues.length; i++) { if (columnValues[i][0] !== "") maxIndex = i; //
+    } //
+    targetRow = startRow + maxIndex + 1; //
+  } //
+  return targetRow; //
+}
+
+function findRowByClientRequestId(sheet, clientRequestId) {
+  if (!sheet || !clientRequestId) return -1;
+  var startRow = 4;
+  var lastRow = Math.min(sheet.getLastRow(), MAX_ROW_LIMIT);
+  if (lastRow < startRow) return -1;
+  var values = sheet.getRange(startRow, 30, lastRow - startRow + 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] && values[i][0].toString() === clientRequestId.toString()) {
+      return startRow + i;
+    }
+  }
+  return -1;
+}
+
 function doPost(e) {
   var lock = LockService.getScriptLock(); //
   lock.tryLock(10000); //
@@ -45,6 +575,9 @@ function doPost(e) {
       } catch (parseErr) { data = e.parameter; } //
     } else if (e) { data = e.parameter; //
     } //
+
+    var earlyBoxLinkResponse = handleBoxLinkAction(data);
+    if (earlyBoxLinkResponse) return earlyBoxLinkResponse;
 
     // ==========================================
     // --- 🔐 AUTHENTICATION & LOGIN SYSTEM ---
@@ -80,13 +613,32 @@ function doPost(e) {
       } else if (inputUser === adminUser && inputPass === adminPass) { //
         return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "admin", permissions: ["new_order", "order", "box"], message: "Welcome Admin" })).setMimeType(ContentService.MimeType.JSON); //
       } else if (inputUser === modUser && inputPass === modPass) { //
-        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" })).setMimeType(ContentService.MimeType.JSON); //
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "moderator", permissions: ["new_order", "order", "box"], message: "Welcome Moderator" })).setMimeType(ContentService.MimeType.JSON); //
       } else { //
         return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid username or password" })).setMimeType(ContentService.MimeType.JSON); //
       } //
     }
 
-    var sheetName = data.sheet || data.sheet_name || ACTIVE_SHEET_NAME; //
+    var activeSheetName = getActiveSheetName(); //
+    if (data.action === "set_active_sheet") {
+      if ((data.role || "").toString().toLowerCase() !== "owner") {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Owner only" })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify(setActiveSheetName(data.sheet_name || data.sheet))).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "save_gift_card" || data.action === "spend_gift_card" || data.action === "link_gift_card_box") {
+      if ((data.role || "").toString().toLowerCase() !== "owner") {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Owner only" })).setMimeType(ContentService.MimeType.JSON);
+      }
+      var giftResult = data.action === "save_gift_card" ? saveGiftCard(data)
+        : data.action === "spend_gift_card" ? spendGiftCard(data)
+        : linkGiftCardBox(data);
+      return ContentService.createTextOutput(JSON.stringify(giftResult)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var isNewOrderSave = !data.action && (!data.row_id || data.row_id === "");
+    var sheetName = isNewOrderSave ? activeSheetName : (data.sheet || data.sheet_name || activeSheetName); //
 
     // ==========================================
     // --- 🔔 NOTIFICATIONS SYSTEM ---
@@ -206,9 +758,10 @@ function doPost(e) {
       if (sheet) { //
         var valueToWrite = data.value !== undefined ? //
         data.value : data.box_cost; //
+        var numericValueToWrite = parseMoneyValue(valueToWrite); //
         if (data.row_ids && Array.isArray(data.row_ids)) { //
-          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 6).setValue(valueToWrite); //
-        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 6).setValue(valueToWrite); } //
+          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 6).setNumberFormat("#,##0").setValue(numericValueToWrite); //
+        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 6).setNumberFormat("#,##0").setValue(numericValueToWrite); } //
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
@@ -217,9 +770,40 @@ function doPost(e) {
       var ss = SpreadsheetApp.getActiveSpreadsheet(); //
       var sheet = ss.getSheetByName(sheetName); //
       if (sheet) { //
+        var shippingValueToWrite = parseMoneyValue(data.value); //
         if (data.row_ids && Array.isArray(data.row_ids)) { //
-          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 8).setValue(data.value); //
-        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 8).setValue(data.value); } //
+          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 8).setNumberFormat("#,##0").setValue(shippingValueToWrite); //
+        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 8).setNumberFormat("#,##0").setValue(shippingValueToWrite); } //
+      }
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
+    }
+
+    if (data.action === "update_box_field_once") { //
+      var ss = SpreadsheetApp.getActiveSpreadsheet(); //
+      var sheet = ss.getSheetByName(sheetName); //
+      var fieldCols = { box_cost: 6, shipping_cost: 8, lost: 11, profit: 12 }; //
+      var col = fieldCols[data.field]; //
+      if (!sheet || !col) { //
+        return ContentService.createTextOutput(JSON.stringify({status: "error", message: "Invalid box field"})).setMimeType(ContentService.MimeType.JSON); //
+      }
+      var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []); //
+      for (var i = 0; i < rowIds.length; i++) { //
+        var row = parseInt(rowIds[i], 10); //
+        if (!row || row < 4 || row > MAX_ROW_LIMIT) continue; //
+        if (typeof isFinishedRow === "function" && isFinishedRow(sheet, row)) continue; //
+        var cell = sheet.getRange(row, col); //
+        if (i === 0) { //
+          if (data.value === "" || data.value === null || data.value === undefined) { //
+            cell.clearContent(); //
+            cell.setNumberFormat("#,##0"); //
+          } else { //
+            cell.setValue(parseMoneyValue(data.value)); //
+            cell.setNumberFormat("#,##0"); //
+          }
+        } else { //
+          cell.clearContent(); //
+          cell.setNumberFormat("#,##0"); //
+        }
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
@@ -274,7 +858,7 @@ function doPost(e) {
       if (notificationText.includes("گەیشتووە")) statusColor = "#dcfce7"; //
       else if (notificationText.includes("نایەوێت")) statusColor = "#fee2e2"; //
       if (statusColor !== "") { //
-        var activeSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ACTIVE_SHEET_NAME); //
+        var activeSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(activeSheetName); //
         var lastRow = activeSheet.getLastRow(); //
         if (lastRow >= 4) { //
           var phoneValues = activeSheet.getRange(4, 9, lastRow - 3, 1).getValues(); //
@@ -346,11 +930,14 @@ function doPost(e) {
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet(); //
+    var activeSheetName = getActiveSheetName(); //
     var allData = []; //
     var monthlyStats = {}; //
     var allSheetNames = []; //
     
     var params = e && e.parameter ? e.parameter : {}; //
+    var earlyBoxLinkResponse = handleBoxLinkAction(params);
+    if (earlyBoxLinkResponse) return earlyBoxLinkResponse;
     // --- 🔔 NOTIFICATIONS SYSTEM (GET) ---
     if (params.action === "get_notifications") { //
         var notifSheet = ss.getSheetByName("Notifications"); //
@@ -376,13 +963,22 @@ function doGet(e) {
         }
         return ContentService.createTextOutput(JSON.stringify({ status: "success", notifications: notifications.reverse() })).setMimeType(ContentService.MimeType.JSON); //
     }
+
+    if (params.action === "get_orders") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", orders: readOrdersLog(ss) })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (params.action === "get_gift_cards") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", gift_cards: readGiftCards(ss) })).setMimeType(ContentService.MimeType.JSON);
+    }
     
     var requestedMonth = params.month; //
     var loadAllLocal = params.load_all_local === 'true'; //
     var loadActiveOnly = !requestedMonth && !loadAllLocal; //
 
-    for (var s = 0; s < LOCAL_SHEETS.length; s++) { // 
-      var sName = LOCAL_SHEETS[s]; // 
+    var orderSheetNames = getOrderSheetNames();
+    for (var s = 0; s < orderSheetNames.length; s++) { // 
+      var sName = orderSheetNames[s]; // 
       var sheet = ss.getSheetByName(sName); //
       if (sheet) { //
         if (!monthlyStats[sName]) { //
@@ -398,7 +994,7 @@ function doGet(e) {
             } catch(err) {}
 
             var sheetCount = 0;
-            if (loadAllLocal || requestedMonth === sName || (loadActiveOnly && sName === ACTIVE_SHEET_NAME)) {
+            if (loadAllLocal || requestedMonth === sName || (loadActiveOnly && sName === activeSheetName)) {
                var sheetData = readSheetData(sheet, sName);
                allData = allData.concat(sheetData);
                sheetCount = sheetData.length;
@@ -411,7 +1007,7 @@ function doGet(e) {
       }
     }
     
-    var response = { status: "success", data: allData, meta: { active_sheet: ACTIVE_SHEET_NAME, monthly_stats: monthlyStats, all_months: allSheetNames } }; // 
+    var response = { status: "success", data: allData, meta: { active_sheet: activeSheetName, monthly_stats: monthlyStats, all_months: allSheetNames } }; // 
     return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON); //
   } catch(error) { //
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() })).setMimeType(ContentService.MimeType.JSON); //
@@ -428,6 +1024,79 @@ function sumRange(sheet, rangeA1) {
   } //
 }
 
+function readOrdersLog(ss) {
+  var logSheet = ss.getSheetByName("Orders");
+  if (!logSheet || logSheet.getLastRow() < 2) return [];
+  var lastRow = logSheet.getLastRow();
+  var lastCol = logSheet.getLastColumn();
+  var headers = logSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var values = logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var orders = [];
+  for (var i = 0; i < values.length; i++) {
+    var rowObj = {};
+    for (var c = 0; c < headers.length; c++) {
+      if (headers[c]) rowObj[headers[c]] = values[i][c];
+    }
+    orders.push(rowObj);
+  }
+  return orders;
+}
+
+function getOrCreateOrdersLogSheet(ss) {
+  var logSheet = ss.getSheetByName("Orders");
+  if (!logSheet) logSheet = ss.insertSheet("Orders");
+  var headers = [
+    "Timestamp", "UniqueOrderID", "ProcessedSheet", "ProcessedRow", "Insta",
+    "Name", "Place", "Phone", "Phone2", "Fib", "RawItems", "RawLink",
+    "RawUnadjustedPrice", "InitialPayment", "Note", "Extra", "BoxName",
+    "PrimaryURLs", "ProofURLs", "LinkedOrderIds", "ClientRequestID", "SubmittedBy", "SubmittedRole", "RawPayload"
+  ];
+  var currentHeader = logSheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var needsHeader = true;
+  for (var i = 0; i < currentHeader.length; i++) {
+    if (currentHeader[i]) { needsHeader = false; break; }
+  }
+  if (needsHeader || currentHeader[headers.length - 1] !== headers[headers.length - 1]) {
+    logSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    logSheet.setFrozenRows(1);
+  }
+  return logSheet;
+}
+
+function appendRawOrderLog(ss, data, sheetName, targetRow, uniqueOrderId) {
+  var logSheet = getOrCreateOrdersLogSheet(ss);
+  var now = new Date();
+  var timestamp = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  var rawPrice = data.customer_price || data.price_iqd || data["price (IQD)"] || data.price || "";
+  var rawItems = data.items || data.raw_items || data.pics_text || data.item || data.link || "";
+  logSheet.appendRow([
+    timestamp,
+    uniqueOrderId,
+    sheetName,
+    targetRow,
+    data.insta || "",
+    data.name || "",
+    data.place || "",
+    data.phone || "",
+    data.phone2 || "",
+    data.fib || "",
+    typeof rawItems === "object" ? JSON.stringify(rawItems) : rawItems,
+    data.link || "",
+    typeof rawPrice === "object" ? JSON.stringify(rawPrice) : rawPrice,
+    data.initial_payment || "",
+    data.note || data.customer_note || "",
+    data.extra || "",
+    data.box_name || "",
+    data.primary_urls || "",
+    data.proof_urls || "",
+    data.linkedOrderIds ? JSON.stringify(data.linkedOrderIds) : "",
+    data.client_request_id || "",
+    data.admin_name || data.submitted_by || "",
+    data.admin_role || data.submitted_role || "",
+    JSON.stringify(data)
+  ]);
+}
+
 function readSheetData(sheet, sheetName) {
   if (!sheet) { return []; } //
 
@@ -435,9 +1104,39 @@ function readSheetData(sheet, sheetName) {
   if (lastRow > MAX_ROW_LIMIT) lastRow = MAX_ROW_LIMIT; //
   if (lastRow < 4) return []; //
   // Read all the way up to AB (Column 28)
-  var dataRange = sheet.getRange(4, 1, lastRow - 3, 28); //
+  var dataRange = sheet.getRange(4, 1, lastRow - 3, 33); //
   var values = dataRange.getValues(); //
   var formulas = dataRange.getFormulas(); //
+  var rowLinks = {};
+  for (var linkScan = 0; linkScan < values.length; linkScan++) {
+    var scanRowIndex = linkScan + 4;
+    rowLinks[scanRowIndex] = parseLinkedRowIds(values[linkScan][27], sheetName);
+  }
+
+  function collectLinkedGroupForRead(seedRow) {
+    var queue = [seedRow];
+    var seen = {};
+    seen[seedRow] = true;
+    var pos = 0;
+    while (pos < queue.length) {
+      var current = queue[pos++];
+      var links = rowLinks[current] || [];
+      for (var li = 0; li < links.length; li++) {
+        if (!seen[links[li]]) {
+          seen[links[li]] = true;
+          queue.push(links[li]);
+        }
+      }
+      for (var otherRow in rowLinks) {
+        if (rowLinks[otherRow].indexOf(current) > -1 && !seen[otherRow]) {
+          seen[otherRow] = true;
+          queue.push(parseInt(otherRow, 10));
+        }
+      }
+    }
+    queue.sort(function(a, b) { return a - b; });
+    return queue;
+  }
   
   var jsonData = []; //
   for (var i = 0; i < values.length; i++) { //
@@ -448,10 +1147,7 @@ function readSheetData(sheet, sheetName) {
     var extraValue = row[18] ? row[18].toString() : ""; //
     var orderNoValue = extraValue !== "" ? extraValue : "Pending"; //
     // 🔗 READ LINKED ORDER IDs FROM COLUMN AB (Index 27)
-    var linkedIdsStr = row[27] ? row[27].toString() : ""; //
-    var linkedIds = []; //
-    if (linkedIdsStr) { linkedIds = linkedIdsStr.split(',').map(function(id) { return id.trim(); }).filter(function(id) { return id; }); //
-    } //
+    var linkedIds = collectLinkedGroupForRead(rowIndex).filter(function(id) { return id !== rowIndex; }); //
 
     var dateVal = "Unknown Date"; //
     var rawDate = row[16]; //
@@ -489,7 +1185,7 @@ function readSheetData(sheet, sheetName) {
     if (row[1] || row[8]) { //
       jsonData.push({ //
         insta: row[0], name: row[1], place: row[2], fib: row[3], price: row[4], //
-        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", phone: row[8] != null ? row[8].toString() : "", //
+        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", shipping_cost: row[7], phone: row[8] != null ? row[8].toString() : "", //
         box_name: row[9] != null ? row[9].toString() : "", lost: row[10], profit: row[11], //
         extra: extraValue, note: noteVal, link: (row[15] || ""), initial_payment: row[13], //
         date: dateVal, orderNo: orderNoValue, trackNo: (row[12] || ""), //
@@ -499,7 +1195,9 @@ function readSheetData(sheet, sheetName) {
         proof_urls: proofUrlsArray, //
         
         primary_urls: primaryImgUrl, //
-  
+        unique_order_id: row[30] || "",
+        admin_name: row[31] || "",
+        admin_role: row[32] || "",
         id: rowIndex, sheet_name: sheetName, //
         linkedOrderIds: linkedIds //
       }); //
@@ -531,29 +1229,28 @@ function handleOrder(data, sheetName) {
   var isUpdate = false; //
   var isLinkedNewOrder = false; //
   var baseLinkedRow = -1; //
+  var incomingLinkedRows = parseLinkedRowIds(data.linkedOrderIds || [], sheetName); //
+  var incomingLinkedRefs = parseOrderLinkRefs(data.linkedOrderIds || [], sheetName); //
+  var existingRequestRow = (!data.row_id && data.client_request_id) ? findRowByClientRequestId(sheet, data.client_request_id) : -1; //
   if (data.row_id && data.row_id != "") { //
     targetRow = parseInt(data.row_id); //
     isUpdate = true; //
-  } else if (data.linkedOrderIds && data.linkedOrderIds.length > 0) { //
+  } else if (existingRequestRow > -1) {
+    targetRow = existingRequestRow;
+    isUpdate = true;
+  } else if (incomingLinkedRefs.length > 0) { //
     isLinkedNewOrder = true; //
-    baseLinkedRow = parseInt(data.linkedOrderIds[0]); //
-    var endRow = baseLinkedRow; //
-    sheet.insertRowAfter(endRow); //
-    targetRow = endRow + 1; //
+    baseLinkedRow = incomingLinkedRefs[0].row; //
+    targetRow = getNextOrderRow(sheet); //
   } else {
-    var startRow = 4; //
-    var lastRowInSheet = sheet.getLastRow(); //
-    if (lastRowInSheet > MAX_ROW_LIMIT) lastRowInSheet = MAX_ROW_LIMIT; //
-    targetRow = startRow; //
-    if (lastRowInSheet >= startRow) { //
-      var columnValues = sheet.getRange(startRow, 5, lastRowInSheet - startRow + 1, 1).getValues(); //
-      var maxIndex = -1; //
-      for (var i = 0; i < columnValues.length; i++) { if (columnValues[i][0] !== "") maxIndex = i; //
-      } //
-      targetRow = startRow + maxIndex + 1; //
-    } //
+    targetRow = getNextOrderRow(sheet); //
   }
   if (targetRow > MAX_ROW_LIMIT) return { 'result': 'error', 'message': 'Sheet Full!' }; //
+  var uniqueOrderId = data.unique_order_id || data.order_uid || data.master_order_id || "";
+  if (isUpdate && !uniqueOrderId) uniqueOrderId = sheet.getRange(targetRow, 31).getValue().toString();
+  if (!uniqueOrderId) uniqueOrderId = Utilities.getUuid();
+  data.unique_order_id = uniqueOrderId;
+  if (!isUpdate) appendRawOrderLog(ss, data, sheetName, targetRow, uniqueOrderId);
 
   data.name = transliterateToLatini(data.name); //
   data.place = transliterateToLatini(data.place); //
@@ -578,16 +1275,11 @@ function handleOrder(data, sheetName) {
   if (p2.startsWith('7')) p2 = '0' + p2; //
   var finalPhone = p1 + (p2 ? " / " + p2 : ""); //
   
-  var priceInput = data['price_iqd'] || data['price (IQD)'] || data.price || "0"; //
+  var priceInput = data.customer_price || data['price_iqd'] || data['price (IQD)'] || data.price || "0"; //
   if (typeof priceInput === 'object') { priceInput = JSON.stringify(priceInput); //
   } //
   var rawPrice = priceInput.toString().replace(/,/g, '').replace(/[^0-9.]/g, '').trim(); //
   var basePrice = parseFloat(rawPrice) || 0; //
-  if (basePrice >= 118000) { //
-    var currentExtra = (data.extra || "").toString().toLowerCase(); //
-    if (!currentExtra.includes("free")) { data.extra = data.extra ? (data.extra + " - Free") : "Free"; //
-    } //
-  }
   
   var rawInitial = (data.initial_payment || "0").toString().replace(/,/g, '').replace(/[^0-9.]/g, ''); //
   var initialPayment = parseFloat(rawInitial) || 0; //
@@ -595,7 +1287,7 @@ function handleOrder(data, sheetName) {
   
   var isNoLocation = placeText === "no location" || placeText === "-"; //
   var isErbil = (placeText.includes("erbil") || placeText.includes("hawler") || placeText.includes("hewler")); //
-  var isOutsideErbil = (placeText.includes("Kurdistan") || placeText.includes("outside Erbil")); //
+  var isOutsideErbil = (placeText.includes("kurdistan") || placeText.includes("outside erbil")); //
   var isOutsideKurdistan = (placeText.includes("iraq") || placeText.includes("outside kurdistan")); //
   
   var actualShipping = 0; //
@@ -618,10 +1310,20 @@ function handleOrder(data, sheetName) {
     } //
   }
 
-  var isFreeDelivery = (data.extra || "").toString().toLowerCase().includes("free"); //
-  var sheetItemPrice = basePrice; //
-  if (isFreeDelivery && !isNoLocation) { sheetItemPrice = basePrice - actualShipping; //
+  var isNewIncomingOrder = !isUpdate; //
+  var freeShippingText = ((data.extra || "") + " " + (data.note || "")).toString(); //
+  var isFreeDelivery = basePrice > 118000 || /free\s*shipping/i.test(freeShippingText) || /\bfree\b/i.test(data.extra || ""); //
+  if (isFreeDelivery) { //
+    var currentExtra = (data.extra || "").toString(); //
+    if (!/\bfree\b/i.test(currentExtra)) data.extra = data.extra ? (data.extra + " Free") : "Free"; //
   } //
+  var postedSheetPrice = data.sheet_price !== undefined && data.sheet_price !== "" ? data.sheet_price : ""; //
+  var postedSheetPriceNum = postedSheetPrice !== "" //
+    ? parseFloat(postedSheetPrice.toString().replace(/,/g, '').replace(/[^0-9.-]/g, '')) //
+    : NaN; //
+  var sheetItemPrice = isNewIncomingOrder //
+    ? (isFreeDelivery ? Math.max(basePrice - actualShipping, 0) : basePrice) //
+    : (!isNaN(postedSheetPriceNum) ? postedSheetPriceNum : basePrice); //
   
   if (!isUpdate && !isLinkedNewOrder && hasShippingDetails) { //
     var l1Cell = sheet.getRange("L1"); //
@@ -657,17 +1359,24 @@ function handleOrder(data, sheetName) {
       var formattedDate = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); //
       sheet.getRange(targetRow, 17).setValue(formattedDate); //
   }
+  if (data.client_request_id) {
+    sheet.getRange(targetRow, 30).setValue(data.client_request_id);
+    sheet.hideColumns(30);
+  }
+  sheet.getRange(targetRow, 31).setValue(uniqueOrderId);
+  sheet.hideColumns(31);
+  sheet.getRange(targetRow, 32).setValue(data.admin_name || data.submitted_by || "");
+  sheet.getRange(targetRow, 33).setValue(data.admin_role || data.submitted_role || "");
+  sheet.hideColumns(32, 2);
 
   data.orderNo = (data.extra || "Pending"); //
   var finalItemPrice = basePrice; //
   // LOGICAL LINKING -> SAVED TO COLUMN AB (28) NOW!
   if (isLinkedNewOrder) { //
-    var linkedString = data.linkedOrderIds.join(","); //
-    sheet.getRange(targetRow, 28).setValue(linkedString); //
-    for (var i = 0; i < data.linkedOrderIds.length; i++) { //
-        sheet.getRange(parseInt(data.linkedOrderIds[i]), 28).setValue(linkedString); //
-    } //
+    relinkOrderRefs(targetRow, sheetName, data.linkedOrderIds || []); //
     finalItemPrice = basePrice; //
+  } else if (isUpdate && data.linkedOrderIds !== undefined) { //
+    relinkOrderRefs(targetRow, sheetName, data.linkedOrderIds || []); //
   }
 
   // 👇 SAVING THE PRIMARY PICTURE (COL V and AA)
@@ -714,37 +1423,106 @@ function handleOrder(data, sheetName) {
           var pdfId = sendTelegramReceipt(data, p1, p2, finalItemPrice, calculatedTotal, isFreeDelivery, initialPayment); //
           var ids = []; if (txtId) ids.push(txtId); if (pdfId) ids.push(pdfId); //
           if (ids.length > 0) { //
-            if (isLinkedNewOrder) { sheet.getRange(baseLinkedRow, 26, targetRow - baseLinkedRow + 1, 1).setValue(ids.join(",")); //
-            } else { sheet.getRange(targetRow, 26).setValue(ids.join(",")); } //
+            var rowsForTelegramIds = isLinkedNewOrder && completeLinkedRows ? completeLinkedRows : [targetRow]; //
+            for (var tgRowIdx = 0; tgRowIdx < rowsForTelegramIds.length; tgRowIdx++) { //
+              sheet.getRange(rowsForTelegramIds[tgRowIdx], 26).setValue(ids.join(",")); //
+            } //
             sheet.hideColumns(26); //
           } //
       } catch (e) { console.log("Telegram Error: " + e); //
       } //
   }
   return { 'result': 'success', 'status': 'success', 'message': isUpdate ? //
-  'Updated Row ' + targetRow : 'Created Row ' + targetRow }; //
+  'Updated Row ' + targetRow : 'Created Row ' + targetRow, 'unique_order_id': uniqueOrderId }; //
 } //
+
+function getLinkedGroupShipping(sheet, rowId) {
+  var place = (sheet.getRange(rowId, 3).getValue() || "").toString().toLowerCase();
+  if (!place || place === "no location" || place === "-") return 0;
+  if (place.includes("erbil") || place.includes("hawler") || place.includes("hewler")) return 3000;
+  if (place.includes("iraq") || place.includes("outside kurdistan")) return 6000;
+  return 5000;
+}
+
+function getLinkedGroupPrice(sheet, rowId) {
+  return parseFloat(String(sheet.getRange(rowId, 5).getValue()).replace(/[^0-9.-]+/g, "")) || 0;
+}
+
+function getLinkedGroupExtra(sheet, rowId) {
+  return sheet.getRange(rowId, 19).getValue().toString();
+}
+
+function getLinkedGroupNote(sheet, rowId) {
+  return sheet.getRange(rowId, 18).getValue().toString();
+}
+
+function hasLinkedGroupFreeText(sheet, rowId) {
+  return /free(?:\s|-)?(?:shipping|ship)?|\[GROUP_SHIP_DEDUCTED\]/i.test(getLinkedGroupExtra(sheet, rowId) + " " + getLinkedGroupNote(sheet, rowId));
+}
+
+function setLinkedGroupMarker(sheet, rowId) {
+  var extraRange = sheet.getRange(rowId, 19);
+  var extra = extraRange.getValue().toString();
+  if (!/\bfree\b/i.test(extra)) extra = (extra + (extra ? " " : "") + "Free").trim();
+  if (!/\[GROUP_SHIP_DEDUCTED\]/i.test(extra)) extra = (extra + (extra ? " " : "") + "[GROUP_SHIP_DEDUCTED]").trim();
+  extraRange.setValue(extra);
+}
+
+function clearLinkedGroupMarker(sheet, rowId) {
+  var extraRange = sheet.getRange(rowId, 19);
+  extraRange.setValue(extraRange.getValue().toString().replace(/\s*\[GROUP_SHIP_DEDUCTED\]/ig, "").trim());
+}
+
+function getLinkedGroupDisplayPrice(sheet, rowId) {
+  var price = getLinkedGroupPrice(sheet, rowId);
+  var shipping = getLinkedGroupShipping(sheet, rowId);
+  return (hasLinkedGroupFreeText(sheet, rowId) || price + shipping > 118000) ? price + shipping : price;
+}
+
+function applyLinkedGroupShipping(sheet, rowIds) {
+  if (!rowIds || rowIds.length === 0) return;
+  var shippingTotal = 0;
+  for (var i = 0; i < rowIds.length; i++) {
+    shippingTotal += parseFloat(String(sheet.getRange(rowIds[i], 8).getValue()).replace(/[^0-9.-]+/g, "")) || 0;
+  }
+  if (shippingTotal === 0 && rowIds.length > 1) shippingTotal = getLinkedGroupShipping(sheet, rowIds[0]);
+
+  if (rowIds.length < 2) {
+    clearLinkedGroupMarker(sheet, rowIds[0]);
+    return;
+  }
+
+  for (var r = 0; r < rowIds.length; r++) {
+    clearLinkedGroupMarker(sheet, rowIds[r]);
+    var shippingCell = sheet.getRange(rowIds[r], 8);
+    if (r === 0) {
+      if (shippingTotal) shippingCell.setValue(shippingTotal).setNumberFormat("#,##0");
+      else shippingCell.clearContent();
+    } else {
+      shippingCell.clearContent();
+    }
+  }
+}
 
 function mergeBuyingPrice(sheetName, rowIds, price, shipping) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(); //
   var sheet = ss.getSheetByName(sheetName); //
   if (!sheet) return { 'result': 'error', 'message': 'Sheet not found' }; //
   if (!rowIds || rowIds.length === 0) return { 'result': 'error', 'message': 'No rows selected' }; //
-  if (typeof rowIds === 'string') { try { rowIds = JSON.parse(rowIds); //
-  } catch(e) { return { 'result': 'error', 'message': 'Invalid row format' }; //
-  } } //
+  rowIds = parseLinkedRowIds(rowIds, sheetName); //
+  if (rowIds.length === 0) return { 'result': 'error', 'message': 'No valid rows selected' }; //
 
   rowIds.sort(function(a, b) { return a - b; }); //
-  var numRows = rowIds.length; //
   try { //
-    var linkedString = rowIds.join(","); //
-    for (var i = 0; i < numRows; i++) { //
-       var currentRow = rowIds[i]; //
-       sheet.getRange(currentRow, 28).setValue(linkedString); // AB
-       if (i === 0 && price !== undefined && price !== "") { sheet.getRange(currentRow, 6).setValue(price).setNumberFormat("#,##0"); //
-       } //
+    if (rowIds.length === 1) { //
+      applyLinkedGroupShipping(sheet, rowIds); //
+      relinkOrderRow(sheet, rowIds[0], [], sheetName); //
+      return { 'result': 'success', 'status': 'success', 'message': 'Order unlinked successfully.' }; //
     }
-    return { 'result': 'success', 'message': 'Logically linked ' + numRows + ' rows successfully.' //
+
+    relinkOrderRow(sheet, rowIds[0], rowIds.slice(1), sheetName); //
+    applyLinkedGroupShipping(sheet, rowIds); //
+    return { 'result': 'success', 'status': 'success', 'message': 'Logically linked ' + rowIds.length + ' rows successfully.' //
     }; //
   } catch (e) { return { 'result': 'error', 'message': e.toString() }; //
   } //
@@ -797,8 +1575,6 @@ function generateReceiptPdf(sheetName, rowId) {
 
 
   var shippingCostForPDF = isFree ? 0 : receiptShipping; //
-  if (isFree && !isNoLocation) { itemPrice = itemPrice + receiptShipping; //
-  } //
   
   var finalTotal = (itemPrice + shippingCostForPDF) - initialPayment; //
   var shippingDisplay = isFree ? //
@@ -828,52 +1604,30 @@ function deleteOrder(rowId, sheetName, linkedOrderIds) {
   if (!sheet) return { 'result': 'error', 'message': 'Sheet not found.' }; //
   var rId = parseInt(rowId); //
   if (rId > MAX_ROW_LIMIT) return { 'result': 'error', 'message': 'Safety Lock.' }; //
-  
-  var idsToDelete = [rId]; //
-  // 🔗 Auto-detect logical merged rows (Column AB/28) to delete the whole group
-  var linkedString = sheet.getRange(rId, 28).getValue().toString(); //
-  if (linkedString !== "") { //
-     var linkedIds = linkedString.split(","); //
-     for (var i = 0; i < linkedIds.length; i++) { //
-        var lId = parseInt(linkedIds[i]); //
-        if (!isNaN(lId) && idsToDelete.indexOf(lId) === -1) { //
-           idsToDelete.push(lId); //
-        } //
-     }
+
+  var linkedRows = getCompleteLinkedRows(sheet, [rId], sheetName); //
+  var hasLinkedSurvivors = linkedRows.filter(function(id) { return id !== rId; }).length > 0; //
+  if (hasLinkedSurvivors) { //
+    clearLinkedGroup(sheet, linkedRows); //
+    var survivorsBeforeDelete = linkedRows.filter(function(id) { return id !== rId; }); //
+    if (survivorsBeforeDelete.length > 1) writeLinkedGroup(sheet, survivorsBeforeDelete); //
   }
 
-  // Backup check if the frontend array sent additional IDs
-  if (linkedOrderIds && Array.isArray(linkedOrderIds)) { //
-    for (var i = 0; i < linkedOrderIds.length; i++) { //
-      var frontendId = parseInt(linkedOrderIds[i]); //
-      if (idsToDelete.indexOf(frontendId) === -1) { //
-        idsToDelete.push(frontendId); //
-      } //
-    }
-  }
-  
-  idsToDelete.sort(function(a, b) { return b - a; }); //
-  var log = []; //
-  for (var j = 0; j < idsToDelete.length; j++) { //
-    var currentRowId = idsToDelete[j]; //
+  if (!hasLinkedSurvivors) { //
     try { //
-        var idString = sheet.getRange(currentRowId, 26).getValue().toString(); //
-        if (idString && idString !== "") { //
-            var ids = idString.split(","); //
-            for (var i = 0; i < ids.length; i++) { //
-                if (ids[i].trim() !== "") { //
-                  deleteTelegramMessage(ids[i].trim()); //
-                } //
-            } 
-        } 
+      var idString = sheet.getRange(rId, 26).getValue().toString(); //
+      if (idString && idString !== "") { //
+        var ids = idString.split(","); //
+        for (var i = 0; i < ids.length; i++) { //
+          if (ids[i].trim() !== "") deleteTelegramMessage(ids[i].trim()); //
+        }
+      }
     } catch(e) {}
-    
-    sheet.deleteRow(currentRowId); //
-    log.push(currentRowId); //
   }
-  
-  return { 'result': 'success', 'status': 'success', 'message': 'Rows ' + log.join(', ') + ' deleted.' //
-  }; //
+
+  sheet.getRange(rId, 1, 1, 33).clearContent().setBackground(null); //
+
+  return { 'result': 'success', 'status': 'success', 'message': 'Row ' + rId + ' cleared.' }; //
 }
 
 function sendTelegram(data, phoneString, itemPrice, totalPrice, warningImageUrl, initialPayment) {
@@ -926,17 +1680,16 @@ function sendTelegramReceipt(data, p1, p2, itemPrice, total, isFree, initialPaym
   var placeLower = (data.place || "").toLowerCase(); //
   var isNoLocation = placeLower === "no location" || placeLower === "-"; //
   var isErbil = placeLower.includes('erbil') || placeLower.includes('hawler') || placeLower.includes('hewler'); //
-  var isOutsideErbil = placeLower.includes('kurdistan') || placeLower.includes('Kurdistan') || placeLower.includes('Kurdistan'); //
+  var isOutsideErbil = placeLower.includes('kurdistan') || placeLower.includes('outside erbil'); //
   var isOutsideKurdistan = placeLower.includes('iraq') || placeLower.includes('outside kurdistan'); //
   var receiptShipping = 0; //
   if (isNoLocation) receiptShipping = 0; //
   else if (isErbil) receiptShipping = 3000; //
   else if (isOutsideErbil) receiptShipping = 5000; //
   else if (isOutsideKurdistan) receiptShipping = 6000; //
-  else receiptShipping = 3000; //
+  else receiptShipping = 5000; //
   
   var shippingCostForPDF = isFree ? 0 : receiptShipping; //
-  if (isFree && !isNoLocation) { itemPrice = itemPrice + receiptShipping; } //
   
   var finalCalculatedTotal = itemPrice + shippingCostForPDF; //
   var finalDisplayTotal = finalCalculatedTotal - paidAmount; //
@@ -996,7 +1749,7 @@ function deleteFromSheetMenu() {
       } //
     }
     
-    sheet.deleteRow(row); //
+    sheet.getRange(row, 1, 1, 33).clearContent().setBackground(null); //
     ui.alert("Deletion Results:\n\n" + log.join("\n")); //
   }
 }

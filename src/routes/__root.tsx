@@ -72,23 +72,65 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "theme-color", content: "#7f1d1d" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "Shein Kurdistani" },
       { title: "Shein Kurdistani" },
-      { name: "description", content: "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information." },
-      { name: "author", content: "Lovable" },
+      {
+        name: "description",
+        content:
+          "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information.",
+      },
+      { name: "author", content: "Shein Kurdistani" },
       { property: "og:title", content: "Shein Kurdistani" },
-      { property: "og:description", content: "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information." },
+      {
+        property: "og:description",
+        content:
+          "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
       { name: "twitter:title", content: "Shein Kurdistani" },
-      { name: "twitter:description", content: "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/CE3PLv8K4bWTuxBUJQlpMLIHSSw1/social-images/social-1778931413250-IMG_20250308_081241_787.webp" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/CE3PLv8K4bWTuxBUJQlpMLIHSSw1/social-images/social-1778931413250-IMG_20250308_081241_787.webp" },
+      {
+        name: "twitter:description",
+        content:
+          "Open Sesame System provides fast access to system data, enabling quick retrieval of the newest information.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/CE3PLv8K4bWTuxBUJQlpMLIHSSw1/social-images/social-1778931413250-IMG_20250308_081241_787.webp",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/CE3PLv8K4bWTuxBUJQlpMLIHSSw1/social-images/social-1778931413250-IMG_20250308_081241_787.webp",
+      },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "manifest",
+        href: "/manifest.json",
+      },
+      {
+        rel: "icon",
+        type: "image/x-icon",
+        href: "/favicon.ico",
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: "/favicon.png",
+      },
+      {
+        rel: "apple-touch-icon",
+        href: "/logo-1080.png",
       },
     ],
   }),

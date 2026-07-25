@@ -8,10 +8,10 @@ export interface CalculatorState {
   autoRetail: number | null;
   autoPromo: number | null;
   autoItems: number | null;
-  activeTab: 'manual' | 'auto';
+  activeTab: "manual" | "auto";
 }
 
-const STORAGE_KEY = 'shein_calculator_state';
+const STORAGE_KEY = "shein_calculator_state";
 
 export const calculatorStore = {
   getState: (): CalculatorState => {
@@ -27,27 +27,29 @@ export const calculatorStore = {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       // Dispatch event so all tabs/systems can listen
-      window.dispatchEvent(new CustomEvent('calculator-state-changed', { detail: state }));
+      window.dispatchEvent(new CustomEvent("calculator-state-changed", { detail: state }));
     } catch {
-      console.error('Failed to save calculator state');
+      console.error("Failed to save calculator state");
     }
   },
 
   reset: () => {
     localStorage.removeItem(STORAGE_KEY);
-    window.dispatchEvent(new CustomEvent('calculator-state-changed', { detail: getDefaultState() }));
-  }
+    window.dispatchEvent(
+      new CustomEvent("calculator-state-changed", { detail: getDefaultState() }),
+    );
+  },
 };
 
 function getDefaultState(): CalculatorState {
   return {
-    manualRetail: '',
-    manualPromo: '',
-    manualItems: '',
+    manualRetail: "",
+    manualPromo: "",
+    manualItems: "",
     autoImage: null,
     autoRetail: null,
     autoPromo: null,
     autoItems: null,
-    activeTab: 'auto'
+    activeTab: "auto",
   };
 }

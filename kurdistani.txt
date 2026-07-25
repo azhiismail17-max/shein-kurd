@@ -10,21 +10,21 @@
 // - Linked Orders mapped logically in Column AB (28) (NO PHYSICAL MERGING)
 // - V: Primary Pic, W: Proof Pic, X: Proof URL, Y: Warning Pic, AA: Primary URL
 
-var ACTIVE_SHEET_NAME = "Mayy"; // <--- UPDATED TO CURRENT SYSTEM ACTIVE SHEET
+var ACTIVE_SHEET_NAME = "July";
 
 // *** MANUAL COUNTS FOR PAST MONTHS ***
 var MANUAL_COUNTS = {
   "Jan": 197, "Dece": 130, "Sept": 112, "Octo": 105, "Nove": 112,
-  "April": 58, "May": 76, "Jun": 24, "July": 61, "Aug": 73
+  "April": 58, "May": 76, "Juni": 24, "Julyi": 61, "Augi": 73
 };
 
 // 1. EXTERNAL FILES
 var EXTERNAL_SOURCES = [
   { name: "April", id: "10ZwnwW8X_Y21i04fzYjlo0Aj52Jofb1VHAkVZv0M6Xk", tabName: "April", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59" },
   { name: "May", id: "17W2qZNidwXX4ezubzyV4UzqGUY4BGNoL90pIbETz0Xw", tabName: "May", priceCell: "C93", balanceCell: "H93", costBuyRange: "D93:E93", costWgtCell: "F93", costEtcCell: "G93" },
-  { name: "Jun", id: "1gFcs7mZjPSWvmRtzkywTnwoDcdDgO5Sx_qbIxsUqstE", tabName: "Jun", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59" },
-  { name: "July", id: "1rWH5fgATyzyWxH0-4s0xuCug_jXRXsabuOJl_ArUN4E", tabName: "July", priceCell: "C90", balanceCell: "H90", costBuyRange: "D90:E90", costWgtCell: "F90", costEtcCell: "G90" },
-  { name: "Aug", id: "1DoUiIxB2mBp3KfWkPidwPzXdqmLRc6fj2wlRsR_xiXo", tabName: "Augs", priceCell: "C98", balanceCell: "H98", costBuyRange: "D98:E98", costWgtCell: "F98", costEtcCell: "G98" },
+  { name: "Juni", id: "1gFcs7mZjPSWvmRtzkywTnwoDcdDgO5Sx_qbIxsUqstE", tabName: "Jun", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59" },
+  { name: "Julyi", id: "1rWH5fgATyzyWxH0-4s0xuCug_jXRXsabuOJl_ArUN4E", tabName: "Julyi", priceCell: "C90", balanceCell: "H90", costBuyRange: "D90:E90", costWgtCell: "F90", costEtcCell: "G90" },
+  { name: "Augi", id: "1DoUiIxB2mBp3KfWkPidwPzXdqmLRc6fj2wlRsR_xiXo", tabName: "Augs", priceCell: "C98", balanceCell: "H98", costBuyRange: "D98:E98", costWgtCell: "F98", costEtcCell: "G98" },
   { name: "Sept", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "September", priceCell: "A157", balanceCell: "AA157", costBuyRange: "L157:Q157", costWgtRange: "R157:T157", costEtcRange: "X157:Z157" },
   { name: "Octo", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "October", priceCell: "A137", balanceCell: "AA137", costBuyRange: "L137:Q137", costWgtRange: "R137:T137", costEtcRange: "X137:Z137" },
   { name: "Nove", id: "1vtdMAcs8pya4FcAL8DsqOnHtNX0kD_-Bfh4-5x2i34Q", tabName: "November", priceCell: "A150", balanceCell: "K150", costBuyCell: "F150", costWgtCell: "H150", costEtcCell: "J150" }
@@ -33,24 +33,776 @@ var EXTERNAL_SOURCES = [
 // 2. LOCAL SHEETS
 var LOCAL_SHEETS = ["Dece", "Jan", "Feb", "March", "Apr", "Mayy", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var MAX_ROW_LIMIT = 500;
+var SETTINGS_SHEET_NAME = "Settings";
+var ACTIVE_SHEET_SETTING_KEY = "active_sheet";
+var GIFT_CARD_SHEET_NAME = "Gift Card";
+var GIFT_CARD_OLD_SHEET_NAME = "GiftCards";
+var BOX_LINK_SHEET_NAME = "Box Link";
+
+function getActiveSheetName() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settings = ss.getSheetByName(SETTINGS_SHEET_NAME);
+  if (!settings) return ACTIVE_SHEET_NAME;
+
+  var lastRow = settings.getLastRow();
+  if (lastRow < 1) return ACTIVE_SHEET_NAME;
+
+  var values = settings.getRange(1, 1, lastRow, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if ((values[i][0] || "").toString().trim() === ACTIVE_SHEET_SETTING_KEY) {
+      var storedSheet = (values[i][1] || "").toString().trim();
+      return LOCAL_SHEETS.indexOf(storedSheet) !== -1 ? storedSheet : ACTIVE_SHEET_NAME;
+    }
+  }
+
+  return ACTIVE_SHEET_NAME;
+}
+
+function setActiveSheetName(sheetName) {
+  var cleanSheetName = (sheetName || "").toString().trim();
+  if (LOCAL_SHEETS.indexOf(cleanSheetName) === -1) {
+    return { status: "error", message: "Invalid month: " + cleanSheetName };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var settings = ss.getSheetByName(SETTINGS_SHEET_NAME);
+  if (!settings) {
+    settings = ss.insertSheet(SETTINGS_SHEET_NAME);
+    settings.getRange(1, 1, 1, 2).setValues([[ACTIVE_SHEET_SETTING_KEY, cleanSheetName]]);
+    return { status: "success", active_sheet: cleanSheetName };
+  }
+
+  var lastRow = Math.max(settings.getLastRow(), 1);
+  var values = settings.getRange(1, 1, lastRow, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if ((values[i][0] || "").toString().trim() === ACTIVE_SHEET_SETTING_KEY) {
+      settings.getRange(i + 1, 2).setValue(cleanSheetName);
+      return { status: "success", active_sheet: cleanSheetName };
+    }
+  }
+
+  settings.getRange(lastRow + 1, 1, 1, 2).setValues([[ACTIVE_SHEET_SETTING_KEY, cleanSheetName]]);
+  return { status: "success", active_sheet: cleanSheetName };
+}
+
+function getOrCreateGiftCardSheet(ss) {
+  var sheet = ss.getSheetByName(GIFT_CARD_SHEET_NAME);
+  var oldSheet = ss.getSheetByName(GIFT_CARD_OLD_SHEET_NAME);
+  if (!sheet && oldSheet) {
+    try { oldSheet.setName(GIFT_CARD_SHEET_NAME); } catch(e) {}
+    sheet = ss.getSheetByName(GIFT_CARD_SHEET_NAME) || oldSheet;
+  }
+  if (!sheet) sheet = ss.insertSheet(GIFT_CARD_SHEET_NAME);
+  var headers = ["ID", "Date", "Card Number", "Card Pin", "Payment Method", "Payment Other", "Card Price", "Spent", "Remaining", "Linked Boxes", "Notes"];
+  var existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var needsHeader = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (existing[i] !== headers[i]) { needsHeader = true; break; }
+  }
+  if (needsHeader) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  try {
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#dcfce7");
+    sheet.autoResizeColumns(1, headers.length);
+  } catch(e) {}
+  return sheet;
+}
+
+function parseGiftCardLinkedBoxes(value) {
+  if (!value) return [];
+  return value.toString().split(",").map(function(box) { return box.trim(); }).filter(function(box) { return box; });
+}
+
+function sortGiftCardsByBalance(cards) {
+  return cards.map(function(card, index) {
+    return { card: card, index: index };
+  }).sort(function(a, b) {
+    var aHasBalance = (parseFloat(a.card.remaining) || 0) > 0 ? 1 : 0;
+    var bHasBalance = (parseFloat(b.card.remaining) || 0) > 0 ? 1 : 0;
+    return (bHasBalance - aHasBalance) || (a.index - b.index);
+  }).map(function(item) {
+    return item.card;
+  });
+}
+
+function readGiftCards(ss) {
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+  var cards = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (!r[0]) continue;
+    cards.push({
+      id: r[0].toString(),
+      date: r[1] ? r[1].toString() : "",
+      card_number: r[2] ? r[2].toString() : "",
+      card_pin: r[3] ? r[3].toString() : "",
+      payment_method: r[4] ? r[4].toString() : "",
+      payment_other: r[5] ? r[5].toString() : "",
+      card_price: parseFloat(r[6]) || 0,
+      spent: parseFloat(r[7]) || 0,
+      remaining: parseFloat(r[8]) || 0,
+      linked_boxes: parseGiftCardLinkedBoxes(r[9]),
+      notes: r[10] ? r[10].toString() : ""
+    });
+  }
+  return sortGiftCardsByBalance(cards.reverse());
+}
+
+function findGiftCardRow(sheet, id) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] && values[i][0].toString() === id.toString()) return i + 2;
+  }
+  return -1;
+}
+
+function saveGiftCard(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var price = parseFloat(data.card_price) || 300;
+  var id = Utilities.getUuid();
+  var date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  var cardNumber = data.card_number || data.cardNumber || data.number || data.insta || "";
+  var cardPin = data.card_pin || data.cardPin || data.pin || data.name || "";
+  cardPin = cardPin.toString().replace(/^PIN\s+/i, "");
+  var paymentMethod = data.payment_method || data.paymentMethod || data.pics_text || "";
+  var paymentOther = data.payment_other || data.paymentOther || "";
+  if (!cardNumber || !cardPin) return { status: "error", message: "Card number and card pin are required" };
+  sheet.appendRow([
+    id,
+    date,
+    cardNumber,
+    cardPin,
+    paymentMethod,
+    paymentOther,
+    price,
+    0,
+    price,
+    "",
+    data.notes || ""
+  ]);
+  return { status: "success", id: id, gift_cards: readGiftCards(ss) };
+}
+
+function updateGiftCard(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var row = findGiftCardRow(sheet, data.id || data.row_id || "");
+  if (row < 2) return { status: "error", message: "Gift card not found" };
+
+  var price = parseFloat(data.card_price) || parseFloat(sheet.getRange(row, 7).getValue()) || 300;
+  var spent = parseFloat(sheet.getRange(row, 8).getValue()) || 0;
+  var remaining = Math.max(price - spent, 0);
+  var cardNumber = data.card_number || data.cardNumber || data.number || data.insta || "";
+  var cardPin = data.card_pin || data.cardPin || data.pin || data.name || "";
+  cardPin = cardPin.toString().replace(/^PIN\s+/i, "");
+  if (!cardNumber || !cardPin) return { status: "error", message: "Card number and card pin are required" };
+
+  sheet.getRange(row, 3).setValue(cardNumber);
+  sheet.getRange(row, 4).setValue(cardPin);
+  sheet.getRange(row, 5).setValue(data.payment_method || data.paymentMethod || data.pics_text || "");
+  sheet.getRange(row, 6).setValue(data.payment_other || data.paymentOther || "");
+  sheet.getRange(row, 7).setValue(price);
+  sheet.getRange(row, 9).setValue(remaining);
+  sheet.getRange(row, 11).setValue(data.notes || data.note || "");
+  return { status: "success", id: sheet.getRange(row, 1).getValue().toString(), gift_cards: readGiftCards(ss) };
+}
+
+function spendGiftCard(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var row = findGiftCardRow(sheet, data.id || "");
+  if (row < 2) return { status: "error", message: "Gift card not found" };
+  var amount = parseFloat(data.amount) || 0;
+  if (amount === 0) return { status: "error", message: "Invalid amount" };
+  var price = parseFloat(sheet.getRange(row, 7).getValue()) || 300;
+  var spent = parseFloat(sheet.getRange(row, 8).getValue()) || 0;
+  var nextSpent = Math.max(spent + amount, 0);
+  var nextRemaining = Math.max(price - nextSpent, 0);
+  sheet.getRange(row, 8).setValue(nextSpent);
+  sheet.getRange(row, 9).setValue(nextRemaining);
+  return { status: "success", spent: nextSpent, remaining: nextRemaining, gift_cards: readGiftCards(ss) };
+}
+
+function linkGiftCardBox(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateGiftCardSheet(ss);
+  var row = findGiftCardRow(sheet, data.id || "");
+  if (row < 2) return { status: "error", message: "Gift card not found" };
+  var boxName = (data.box_name || "").toString().trim();
+  var sheetName = (data.sheet_name || data.sheet || getActiveSheetName()).toString().trim();
+  if (!boxName) return { status: "error", message: "Missing box name" };
+  var boxKey = sheetName + ":" + boxName;
+  var linked = parseGiftCardLinkedBoxes(sheet.getRange(row, 10).getValue());
+  if (linked.indexOf(boxKey) === -1) linked.push(boxKey);
+  sheet.getRange(row, 10).setValue(linked.join(","));
+  return { status: "success", linked_boxes: linked, gift_cards: readGiftCards(ss) };
+}
+
+function giftCardJsonResponse(result) {
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function canManageBoxLinkRole(role) {
+  var cleanRole = (role || "").toString().toLowerCase();
+  return cleanRole === "owner" || cleanRole === "admin";
+}
+
+function cleanBoxLinkMediaValues(value) {
+  var list = value;
+  if (typeof list === "string") {
+    var raw = list.trim();
+    if (!raw) return [];
+    try {
+      var parsed = JSON.parse(raw);
+      list = Array.isArray(parsed) ? parsed : [raw];
+    } catch (e) {
+      list = [raw];
+    }
+  } else if (!Array.isArray(list)) {
+    list = list ? [list] : [];
+  }
+
+  var cleaned = [];
+  for (var i = 0; i < list.length; i++) {
+    var item = (list[i] || "").toString().trim();
+    if (item && cleaned.indexOf(item) === -1) cleaned.push(item);
+  }
+  return cleaned;
+}
+
+function parseLegacyBoxLinkMedia(value) {
+  var raw = (value || "").toString().trim();
+  if (!raw) return { pictures: [], warnings: [] };
+  var prefix = "BOX_MEDIA_V1:";
+  if (raw.indexOf(prefix) === 0) {
+    try {
+      var parsed = JSON.parse(raw.substring(prefix.length));
+      return {
+        pictures: cleanBoxLinkMediaValues(parsed.pictures),
+        warnings: cleanBoxLinkMediaValues(parsed.warnings)
+      };
+    } catch (e) {
+      return { pictures: [], warnings: [] };
+    }
+  }
+  return { pictures: [raw], warnings: [] };
+}
+
+function serializeLegacyBoxLinkMedia(pictures, warnings) {
+  var cleanPictures = cleanBoxLinkMediaValues(pictures);
+  var cleanWarnings = cleanBoxLinkMediaValues(warnings);
+  if (cleanWarnings.length === 0 && cleanPictures.length <= 1) return cleanPictures[0] || "";
+  return "BOX_MEDIA_V1:" + JSON.stringify({ pictures: cleanPictures, warnings: cleanWarnings });
+}
+
+function getOrCreateBoxLinkSheet(ss) {
+  var sheet = ss.getSheetByName(BOX_LINK_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(BOX_LINK_SHEET_NAME);
+  var headers = ["ID", "Sheet Name", "Box Name", "Total Link", "Pictures", "Warnings", "Updated At", "Updated By", "Updated Role"];
+  var existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var hasLegacyMediaColumns = existing[4] === "Picture" || existing[5] === "Picture URL";
+
+  // Migrate the previous combined Picture URL column into dedicated Pictures and Warnings columns.
+  if (hasLegacyMediaColumns && sheet.getLastRow() > 1) {
+    var legacyValues = sheet.getRange(2, 6, sheet.getLastRow() - 1, 1).getValues();
+    var migratedValues = [];
+    for (var legacyIndex = 0; legacyIndex < legacyValues.length; legacyIndex++) {
+      var legacyMedia = parseLegacyBoxLinkMedia(legacyValues[legacyIndex][0]);
+      migratedValues.push([JSON.stringify(legacyMedia.pictures), JSON.stringify(legacyMedia.warnings)]);
+    }
+    sheet.getRange(2, 5, migratedValues.length, 2).setValues(migratedValues);
+  }
+
+  var needsHeader = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (existing[i] !== headers[i]) { needsHeader = true; break; }
+  }
+  if (needsHeader) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  try {
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#dbeafe");
+    sheet.autoResizeColumns(1, 4);
+    sheet.setColumnWidth(5, 260);
+    sheet.setColumnWidth(6, 260);
+    sheet.autoResizeColumns(7, 3);
+  } catch(e) {}
+  return sheet;
+}
+
+function readBoxLinks(ss) {
+  var sheet = getOrCreateBoxLinkSheet(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var values = sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  var links = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i];
+    if (!r[0] && !r[2]) continue;
+    var pictures = cleanBoxLinkMediaValues(r[4]);
+    var warnings = cleanBoxLinkMediaValues(r[5]);
+    links.push({
+      id: r[0] ? r[0].toString() : "",
+      sheet_name: r[1] ? r[1].toString() : "",
+      box_name: r[2] ? r[2].toString() : "",
+      total_link: r[3] ? r[3].toString() : "",
+      pictures: pictures,
+      warnings: warnings,
+      image_url: serializeLegacyBoxLinkMedia(pictures, warnings),
+      updated_at: r[6] ? r[6].toString() : "",
+      updated_by: r[7] ? r[7].toString() : "",
+      updated_role: r[8] ? r[8].toString() : ""
+    });
+  }
+  return links;
+}
+
+function findBoxLinkRow(sheet, sheetName, boxName) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  var values = sheet.getRange(2, 2, lastRow - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if ((values[i][0] || "").toString() === sheetName && (values[i][1] || "").toString() === boxName) return i + 2;
+  }
+  return -1;
+}
+
+function saveBoxLink(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getOrCreateBoxLinkSheet(ss);
+  var sheetName = (data.sheet_name || data.sheet || getActiveSheetName()).toString().trim();
+  var boxName = (data.box_name || "").toString().trim();
+  if (!boxName) return { status: "error", message: "Missing box name" };
+  var totalLink = (data.total_link || data.totalLink || "").toString().trim();
+  var legacyMedia = parseLegacyBoxLinkMedia(data.image_url || data.imageUrl || "");
+  var pictures = data.pictures !== undefined
+    ? cleanBoxLinkMediaValues(data.pictures)
+    : legacyMedia.pictures;
+  var warnings = data.warnings !== undefined
+    ? cleanBoxLinkMediaValues(data.warnings)
+    : legacyMedia.warnings;
+  var imageUrl = serializeLegacyBoxLinkMedia(pictures, warnings);
+  var updatedAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  var updatedBy = (data.updated_by || data.admin_name || data.submitted_by || "").toString();
+  var updatedRole = (data.role || data.updated_role || "").toString();
+  var row = findBoxLinkRow(sheet, sheetName, boxName);
+  var id = row > 1 ? sheet.getRange(row, 1).getValue().toString() : Utilities.getUuid();
+  var rowValues = [id, sheetName, boxName, totalLink, JSON.stringify(pictures), JSON.stringify(warnings), updatedAt, updatedBy, updatedRole];
+  if (row < 2) {
+    sheet.appendRow(rowValues);
+    row = sheet.getLastRow();
+  } else {
+    sheet.getRange(row, 1, 1, 9).setValues([rowValues]);
+  }
+  SpreadsheetApp.flush();
+  return {
+    status: "success",
+    box_link: {
+      id: id,
+      sheet_name: sheetName,
+      box_name: boxName,
+      total_link: totalLink,
+      pictures: pictures,
+      warnings: warnings,
+      image_url: imageUrl,
+      updated_at: updatedAt,
+      updated_by: updatedBy,
+      updated_role: updatedRole
+    },
+    box_links: readBoxLinks(ss)
+  };
+}
+
+function boxLinkJsonResponse(result) {
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleBoxLinkAction(data) {
+  var action = (data.action || "").toString().trim();
+  if (["get_box_links", "save_box_link"].indexOf(action) === -1) return null;
+  if (!canManageBoxLinkRole(data.role)) {
+    return boxLinkJsonResponse({ status: "error", message: "Owner/Admin only" });
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (action === "get_box_links") return boxLinkJsonResponse({ status: "success", box_links: readBoxLinks(ss) });
+  return boxLinkJsonResponse(saveBoxLink(data));
+}
+
+function parseMoneyValue(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  var parsed = parseFloat(value.toString().replace(/[^0-9.-]+/g, ""));
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+function handleGiftCardAction(data) {
+  var action = (data.action || "").toString().trim();
+  if (["save_gift_card", "update_gift_card", "spend_gift_card", "link_gift_card_box", "get_gift_cards"].indexOf(action) === -1) return null;
+  if (action !== "get_gift_cards" && (data.role || "").toString().toLowerCase() !== "owner") {
+    return giftCardJsonResponse({ status: "error", message: "Owner only" });
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (action === "get_gift_cards") {
+    return giftCardJsonResponse({ status: "success", gift_cards: readGiftCards(ss) });
+  }
+
+  var result = action === "save_gift_card" ? saveGiftCard(data)
+    : action === "update_gift_card" ? updateGiftCard(data)
+    : action === "spend_gift_card" ? spendGiftCard(data)
+    : linkGiftCardBox(data);
+  return giftCardJsonResponse(result);
+}
 
 // STATUS COLOR MAP
 var STATUS_COLOR_MAP = {
   "arrived": "#dcfce7",
+  "in_warehouse": "#ccfbf1",
+  "in_transit": "#ede9fe",
+  "purchased": "#dbeafe",
+  "pending": null,
   "cancelled": "#fee2e2",
   "approved": "#dbeafe",
-  "pending": null,
   "match": "#dcfce7",
   "mismatch": null,
   "missing": "#fed7aa"
 };
 
+var FINISHED_BOX_COLOR = "#ffedd5";
+
 function applyStatusColor(sheet, rowId, statusKey) {
   if (!sheet) { return; }
-  var color = STATUS_COLOR_MAP[statusKey] || null;
+  if (isFinishedRow(sheet, rowId)) { return; }
+  var normalizedStatus = normalizeStatusKey(statusKey);
+  var color = STATUS_COLOR_MAP[normalizedStatus] || (statusKey && statusKey.toString().charAt(0) === "#" ? statusKey : null);
   var cols = ['A', 'B', 'C', 'E', 'G', 'I'];
   var ranges = cols.map(function(c) { return c + rowId; });
   try { sheet.getRangeList(ranges).setBackground(color); } catch (e) {}
+}
+
+function isFinishedRow(sheet, rowId) {
+  try {
+    return sheet && parseInt(rowId) >= 4 && sheet.getRange(parseInt(rowId), 1).getBackground().toLowerCase() === FINISHED_BOX_COLOR;
+  } catch(e) { return false; }
+}
+
+function lockedResponse(rowId) {
+  return ContentService.createTextOutput(JSON.stringify({
+    status: "locked",
+    result: "locked",
+    message: "Row " + rowId + " is finished and can only be changed manually in the sheet."
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function normalizeStatusKey(statusKey) {
+  var s = (statusKey || "").toString().trim().toLowerCase();
+  if (s === "#fee2e2") return "cancelled";
+  if (s === "#dbeafe") return "purchased";
+  if (s === "#ede9fe") return "in_transit";
+  if (s === "#ccfbf1") return "in_warehouse";
+  if (s === "#dcfce7") return "arrived";
+  if (s === "#fed7aa") return "missing";
+  if (s === "approved") return "purchased";
+  return s;
+}
+
+function parseLinkedRowIds(value, sheetName) {
+  var input = value;
+  if (input === null || input === undefined || input === "") return [];
+  if (typeof input === "string") {
+    var trimmed = input.trim();
+    if (trimmed.charAt(0) === "[") {
+      try { input = JSON.parse(trimmed); } catch(e) { input = trimmed.split(","); }
+    } else {
+      input = trimmed.split(",");
+    }
+  }
+  if (!Array.isArray(input)) input = [input];
+
+  var seen = {};
+  var ids = [];
+  for (var i = 0; i < input.length; i++) {
+    var token = (input[i] || "").toString().trim();
+    if (!token) continue;
+
+    var rowPart = token;
+    if (token.indexOf(":") > -1) {
+      var parts = token.split(":");
+      rowPart = parts[0];
+      var tokenSheet = parts.slice(1).join(":").trim();
+      if (tokenSheet && sheetName && tokenSheet !== sheetName) continue;
+    }
+
+    var rowId = parseInt(rowPart, 10);
+    if (!isNaN(rowId) && rowId >= 4 && rowId <= MAX_ROW_LIMIT && !seen[rowId]) {
+      seen[rowId] = true;
+      ids.push(rowId);
+    }
+  }
+  ids.sort(function(a, b) { return a - b; });
+  return ids;
+}
+
+function parseLinkedCellTokens(value) {
+  var input = value;
+  if (input === null || input === undefined || input === "") return [];
+  if (typeof input === "string") {
+    var trimmed = input.trim();
+    if (trimmed.charAt(0) === "[") {
+      try { input = JSON.parse(trimmed); } catch(e) { input = trimmed.split(","); }
+    } else {
+      input = trimmed.split(",");
+    }
+  }
+  if (!Array.isArray(input)) input = [input];
+
+  var seen = {};
+  var tokens = [];
+  for (var i = 0; i < input.length; i++) {
+    var token = (input[i] || "").toString().trim();
+    if (!token || seen[token]) continue;
+    seen[token] = true;
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function getOrderSheetByName(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet) return sheet;
+
+  for (var x = 0; x < EXTERNAL_SOURCES.length; x++) {
+    if (EXTERNAL_SOURCES[x].name === sheetName) {
+      try {
+        var extSS = SpreadsheetApp.openById(EXTERNAL_SOURCES[x].id);
+        return extSS.getSheetByName(EXTERNAL_SOURCES[x].tabName);
+      } catch(e) {}
+    }
+  }
+  return null;
+}
+
+function normalizeOrderRef(rowId, sheetName) {
+  return parseInt(rowId, 10) + ":" + sheetName;
+}
+
+function writeOrderLinkRefs(sheet, rowId, refs) {
+  var seen = {};
+  var cleanRefs = [];
+  for (var i = 0; i < refs.length; i++) {
+    var ref = (refs[i] || "").toString().trim();
+    if (!ref || seen[ref]) continue;
+    seen[ref] = true;
+    cleanRefs.push(ref);
+  }
+  if (cleanRefs.length > 0) sheet.getRange(parseInt(rowId, 10), 28).setValue(cleanRefs.join(","));
+  else sheet.getRange(parseInt(rowId, 10), 28).clearContent();
+}
+
+function getCompleteLinkedRows(sheet, seedRows, sheetName) {
+  var queue = parseLinkedRowIds(seedRows, sheetName);
+  var seen = {};
+  for (var i = 0; i < queue.length; i++) seen[queue[i]] = true;
+
+  var index = 0;
+  while (index < queue.length) {
+    var rowId = queue[index++];
+    var linkedValue = "";
+    try { linkedValue = sheet.getRange(rowId, 28).getValue().toString(); } catch(e) {}
+    var linkedRows = parseLinkedRowIds(linkedValue, sheetName);
+    for (var j = 0; j < linkedRows.length; j++) {
+      if (!seen[linkedRows[j]]) {
+        seen[linkedRows[j]] = true;
+        queue.push(linkedRows[j]);
+      }
+    }
+  }
+  queue.sort(function(a, b) { return a - b; });
+  return queue;
+}
+
+function writeLinkedGroup(sheet, rowIds, sheetName) {
+  var ids = parseLinkedRowIds(rowIds, "");
+  if (ids.length === 0) return;
+  var refs = ids.map(function(id) {
+    return sheetName ? normalizeOrderRef(id, sheetName) : id.toString();
+  });
+  var linkedString = refs.join(",");
+  for (var i = 0; i < ids.length; i++) {
+    sheet.getRange(ids[i], 28).setValue(linkedString);
+  }
+}
+
+function clearLinkedGroup(sheet, rowIds) {
+  var ids = parseLinkedRowIds(rowIds, "");
+  for (var i = 0; i < ids.length; i++) {
+    sheet.getRange(ids[i], 28).clearContent();
+  }
+}
+
+function relinkOrderRow(sheet, targetRow, linkedRows, sheetName) {
+  var newGroup = parseLinkedRowIds(linkedRows, sheetName);
+  if (newGroup.indexOf(targetRow) === -1) newGroup.push(targetRow);
+  newGroup.sort(function(a, b) { return a - b; });
+
+  var groups = [getCompleteLinkedRows(sheet, [targetRow], sheetName)];
+  for (var i = 0; i < newGroup.length; i++) {
+    groups.push(getCompleteLinkedRows(sheet, [newGroup[i]], sheetName));
+  }
+
+  var affected = [];
+  for (var g = 0; g < groups.length; g++) {
+    for (var j = 0; j < groups[g].length; j++) {
+      if (affected.indexOf(groups[g][j]) === -1) affected.push(groups[g][j]);
+    }
+  }
+
+  clearLinkedGroup(sheet, affected);
+  for (var k = 0; k < groups.length; k++) {
+    var remaining = groups[k].filter(function(id) { return newGroup.indexOf(id) === -1; });
+    remaining.sort(function(a, b) { return a - b; });
+    if (remaining.length > 1) writeLinkedGroup(sheet, remaining, sheetName);
+  }
+  if (newGroup.length > 1) writeLinkedGroup(sheet, newGroup, sheetName);
+}
+
+function parseOrderLinkRefs(value, fallbackSheetName) {
+  var tokens = parseLinkedCellTokens(value || []);
+  var refs = [];
+  var seen = {};
+  for (var i = 0; i < tokens.length; i++) {
+    var token = (tokens[i] || "").toString().replace(/^!/, "").trim();
+    if (!token) continue;
+    var parts = token.split(":");
+    var row = parseInt(parts[0], 10);
+    var sheetName = parts.length > 1 ? parts.slice(1).join(":").trim() : fallbackSheetName;
+    if (!row || row < 4 || row > MAX_ROW_LIMIT || !sheetName) continue;
+    var key = normalizeOrderRef(row, sheetName);
+    if (seen[key]) continue;
+    seen[key] = true;
+    refs.push({ row: row, sheetName: sheetName, key: key });
+  }
+  return refs;
+}
+
+function getCompleteLinkedRefs(seedRefs) {
+  var queue = parseOrderLinkRefs(seedRefs || [], "");
+  var seen = {};
+  for (var i = 0; i < queue.length; i++) seen[queue[i].key] = true;
+
+  var index = 0;
+  while (index < queue.length) {
+    var current = queue[index++];
+    var sheet = getOrderSheetByName(current.sheetName);
+    if (!sheet) continue;
+    var linkedValue = "";
+    try { linkedValue = sheet.getRange(current.row, 28).getValue().toString(); } catch(e) {}
+    var linkedRefs = parseOrderLinkRefs(linkedValue, current.sheetName);
+    for (var j = 0; j < linkedRefs.length; j++) {
+      if (!seen[linkedRefs[j].key]) {
+        seen[linkedRefs[j].key] = true;
+        queue.push(linkedRefs[j]);
+      }
+    }
+  }
+  return queue;
+}
+
+function relinkOrderRefs(targetRow, targetSheetName, linkedRefs) {
+  var targetRef = normalizeOrderRef(targetRow, targetSheetName);
+  var newGroup = parseOrderLinkRefs(linkedRefs || [], targetSheetName);
+  if (newGroup.filter(function(o) { return o.key === targetRef; }).length === 0) {
+    newGroup.push({ row: parseInt(targetRow, 10), sheetName: targetSheetName, key: targetRef });
+  }
+
+  var newKeys = {};
+  for (var i = 0; i < newGroup.length; i++) newKeys[newGroup[i].key] = true;
+
+  var oldGroups = [];
+  var affected = {};
+  var seeds = newGroup.slice();
+  seeds.push({ row: parseInt(targetRow, 10), sheetName: targetSheetName, key: targetRef });
+  for (var s = 0; s < seeds.length; s++) {
+    var group = getCompleteLinkedRefs([seeds[s].key]);
+    oldGroups.push(group);
+    for (var g = 0; g < group.length; g++) affected[group[g].key] = group[g];
+  }
+  for (var n = 0; n < newGroup.length; n++) affected[newGroup[n].key] = newGroup[n];
+
+  for (var key in affected) {
+    if (!affected.hasOwnProperty(key)) continue;
+    var current = affected[key];
+    var sheet = getOrderSheetByName(current.sheetName);
+    if (sheet) writeOrderLinkRefs(sheet, current.row, []);
+  }
+
+  for (var og = 0; og < oldGroups.length; og++) {
+    var remaining = oldGroups[og].filter(function(o) { return !newKeys[o.key]; });
+    if (remaining.length < 2) continue;
+    for (var r = 0; r < remaining.length; r++) {
+      var rem = remaining[r];
+      var remSheet = getOrderSheetByName(rem.sheetName);
+      if (!remSheet) continue;
+      writeOrderLinkRefs(remSheet, rem.row, remaining.filter(function(o) { return o.key !== rem.key; }).map(function(o) { return o.key; }));
+    }
+  }
+
+  if (newGroup.length > 1) {
+    for (var x = 0; x < newGroup.length; x++) {
+      var order = newGroup[x];
+      var orderSheet = getOrderSheetByName(order.sheetName);
+      if (!orderSheet) continue;
+      writeOrderLinkRefs(orderSheet, order.row, newGroup.filter(function(o) { return o.key !== order.key; }).map(function(o) { return o.key; }));
+    }
+  }
+}
+
+function getNextOrderRow(sheet) {
+  var startRow = 4;
+  var lastRowInSheet = sheet.getLastRow();
+  if (lastRowInSheet > MAX_ROW_LIMIT) lastRowInSheet = MAX_ROW_LIMIT;
+  var targetRow = startRow;
+  if (lastRowInSheet >= startRow) {
+    var columnValues = sheet.getRange(startRow, 5, lastRowInSheet - startRow + 1, 1).getValues();
+    var maxIndex = -1;
+    for (var i = 0; i < columnValues.length; i++) {
+      if (columnValues[i][0] !== "") maxIndex = i;
+    }
+    targetRow = startRow + maxIndex + 1;
+  }
+  return targetRow;
+}
+
+function findRowByClientRequestId(sheet, clientRequestId) {
+  if (!sheet || !clientRequestId) return -1;
+  var startRow = 4;
+  var lastRow = Math.min(sheet.getLastRow(), MAX_ROW_LIMIT);
+  if (lastRow < startRow) return -1;
+  var values = sheet.getRange(startRow, 30, lastRow - startRow + 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] && values[i][0].toString() === clientRequestId.toString()) {
+      return startRow + i;
+    }
+  }
+  return -1;
+}
+
+function setStatusTag(extraText, statusKey) {
+  var status = normalizeStatusKey(statusKey);
+  if (["pending", "purchased", "in_transit", "in_warehouse", "arrived"].indexOf(status) === -1) {
+    return (extraText || "").toString();
+  }
+  var clean = (extraText || "").toString()
+    .replace(/\[(?:PENDING|APPROVED|PURCHASED|IN_TRANSIT|IN_WAREHOUSE|ARRIVED|CANCELLED)(?:-[^\]]*)?\]/gi, "")
+    .replace(/\s*\|\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return ("[" + status.toUpperCase() + "]" + (clean ? " " + clean : "")).trim();
 }
 
 function doPost(e) {
@@ -63,6 +815,11 @@ function doPost(e) {
       } catch (parseErr) { data = e.parameter; }
     } else if (e) { data = e.parameter; }
 
+    var earlyGiftCardResponse = handleGiftCardAction(data);
+    if (earlyGiftCardResponse) return earlyGiftCardResponse;
+    var earlyBoxLinkResponse = handleBoxLinkAction(data);
+    if (earlyBoxLinkResponse) return earlyBoxLinkResponse;
+
     // ==========================================
     // --- 🔐 AUTHENTICATION & LOGIN SYSTEM ---
     // ==========================================
@@ -72,40 +829,210 @@ function doPost(e) {
       
       if (!authSheet) {
         authSheet = ss.insertSheet("Auth");
-        authSheet.getRange("A1:C3").setValues([
-          ["owner", "ownerpass123", "Owner"],
-          ["admin", "adminpass123", "Admin"],
-          ["mod", "modpass123", "Moderator"]
+        authSheet.getRange("A3:D9").setValues([
+          ["kurd_owner", "ownerpass123", "iraqi_owner", "ownerpass123"],
+          ["kurd_admin", "adminpass123", "iraqi_admin", "adminpass123"],
+          ["kurd_mod_1", "modpass123", "iraqi_mod_1", "modpass123"],
+          ["kurd_mod_2", "modpass123", "iraqi_mod_2", "modpass123"],
+          ["kurd_mod_3", "modpass123", "iraqi_mod_3", "modpass123"],
+          ["kurd_mod_4", "modpass123", "iraqi_mod_4", "modpass123"],
+          ["kurd_delivery", "deliverypass123", "iraqi_delivery", "deliverypass123"]
         ]);
         return ContentService.createTextOutput(JSON.stringify({
           status: "error", 
-          message: "Auth sheet missing. Auto-created. Update Usernames in Col A, Passwords in B."
+          message: "Auth sheet missing. Auto-created. Put Kurdistani users in A/B rows 3-9 and Iraqi users in C/D rows 3-9."
         })).setMimeType(ContentService.MimeType.JSON);
       }
       
-      var ownerUser = authSheet.getRange("A1").getValue().toString().trim();
-      var ownerPass = authSheet.getRange("B1").getValue().toString().trim();
-      var adminUser = authSheet.getRange("A2").getValue().toString().trim();
-      var adminPass = authSheet.getRange("B2").getValue().toString().trim();
-      var modUser   = authSheet.getRange("A3").getValue().toString().trim();
-      var modPass   = authSheet.getRange("B3").getValue().toString().trim();
-      var modUser   = authSheet.getRange("A4").getValue().toString().trim();
-      var modPass   = authSheet.getRange("B4").getValue().toString().trim();
       var inputUser = (data.username || "").toString().trim();
       var inputPass = (data.password || "").toString().trim();
 
-      if (inputUser === ownerUser && inputPass === ownerPass) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "owner", permissions: ["all"], message: "Welcome Owner" })).setMimeType(ContentService.MimeType.JSON);
-      } else if (inputUser === adminUser && inputPass === adminPass) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "admin", permissions: ["new_order", "order", "box"], message: "Welcome Admin" })).setMimeType(ContentService.MimeType.JSON);
-      } else if (inputUser === modUser && inputPass === modPass) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "success", role: "moderator", permissions: ["new_order", "order"], message: "Welcome Moderator" })).setMimeType(ContentService.MimeType.JSON);
-      } else {
-        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid username or password" })).setMimeType(ContentService.MimeType.JSON);
+      var rolesByRow = {
+        3: { role: "owner", permissions: ["all"], message: "Welcome Owner" },
+        4: { role: "admin", permissions: ["new_order", "order", "box"], message: "Welcome Admin" },
+        5: { role: "moderator", permissions: ["new_order", "order", "box"], message: "Welcome Moderator" },
+        6: { role: "moderator", permissions: ["new_order", "order", "box"], message: "Welcome Moderator" },
+        7: { role: "moderator", permissions: ["new_order", "order", "box"], message: "Welcome Moderator" },
+        8: { role: "moderator", permissions: ["new_order", "order", "box"], message: "Welcome Moderator" },
+        9: { role: "delivery", permissions: ["delivery", "order"], message: "Welcome Delivery" }
+      };
+
+      function tryAuthRows(userCol, passCol, systemName) {
+        for (var row = 3; row <= 9; row++) {
+          var authUser = authSheet.getRange(row, userCol).getValue().toString().trim();
+          var authPass = authSheet.getRange(row, passCol).getValue().toString().trim();
+          if (authUser && inputUser === authUser && inputPass === authPass) {
+            var auth = rolesByRow[row];
+            return {
+              status: "success",
+              role: auth.role,
+              permissions: auth.permissions,
+              system: systemName,
+              message: auth.message
+            };
+          }
+        }
+        return null;
+      }
+
+      var kurdLogin = tryAuthRows(1, 2, "kurdistani");
+      if (kurdLogin) { return ContentService.createTextOutput(JSON.stringify(kurdLogin)).setMimeType(ContentService.MimeType.JSON); }
+
+      var iraqiLogin = tryAuthRows(3, 4, "iraqi");
+      if (iraqiLogin) { return ContentService.createTextOutput(JSON.stringify(iraqiLogin)).setMimeType(ContentService.MimeType.JSON); }
+
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid username or password" })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+   // ==========================================
+// --- CUSTOMER ORDER TRACKING SYSTEM ---
+// ==========================================
+if (data.action === "track_order") {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var activeSheetName = getActiveSheetName();
+  var searchSheetName = data.sheet || activeSheetName;
+  var searchSheet = ss.getSheetByName(searchSheetName);
+  var sheetsToSearch = [];
+  if (searchSheet) sheetsToSearch.push(searchSheet);
+
+  var allSheets = ss.getSheets();
+  for (var s = 0; s < allSheets.length; s++) {
+    if (!searchSheet || allSheets[s].getName() !== searchSheet.getName()) {
+      sheetsToSearch.push(allSheets[s]);
+    }
+  }
+
+  if (sheetsToSearch.length === 0) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "System updating, please try again." })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var inputPhone = (data.phone || "").toString().replace(/\D/g, "");
+  if (inputPhone.startsWith("00964")) inputPhone = inputPhone.substring(5);
+  if (inputPhone.startsWith("964")) inputPhone = inputPhone.substring(3);
+  if (inputPhone.startsWith("0")) inputPhone = inputPhone.substring(1);
+
+  // Customer enters the sheet row ID, for example 24, 35, 80.
+  var inputOrderId = (data.order_id || "").toString().replace(/\s/g, "").toLowerCase();
+
+  function getSituationStatus(value) {
+    var raw = (value || "").toString().trim();
+    var situation = raw.toLowerCase().replace(/[\s-]+/g, "_");
+
+    if (situation.indexOf("cancel") > -1 || raw.indexOf("نایەوێت") > -1) {
+      return { statusKey: "cancelled", statusText: "Cancelled / نایەوێت", statusColor: "#fee2e2", situation: raw };
+    }
+    if (situation.indexOf("deliver") > -1 || situation.indexOf("complete") > -1 || situation.indexOf("finish") > -1) {
+      return { statusKey: "delivered", statusText: "Delivered / Completed", statusColor: "#dcfce7", situation: raw };
+    }
+    if (situation.indexOf("arriv") > -1 || raw.indexOf("گەیشتووە") > -1) {
+      return { statusKey: "arrived", statusText: "Arrived / گەیشتووە", statusColor: "#dcfce7", situation: raw };
+    }
+    if (situation.indexOf("warehouse") > -1 || situation.indexOf("koga") > -1 || raw.indexOf("کۆگا") > -1) {
+      return { statusKey: "in_warehouse", statusText: "In Warehouse / لە کۆگا", statusColor: "#ccfbf1", situation: raw };
+    }
+    if (situation.indexOf("transit") > -1 || situation.indexOf("shipping") > -1 || raw.indexOf("ڕێگا") > -1) {
+      return { statusKey: "in_transit", statusText: "In Transit / لە ڕێگایە", statusColor: "#ede9fe", situation: raw };
+    }
+    if (situation.indexOf("purchas") > -1 || situation.indexOf("approved") > -1 || raw.indexOf("کڕدراوە") > -1) {
+      return { statusKey: "purchased", statusText: "Purchased / کڕدراوە", statusColor: "#dbeafe", situation: raw };
+    }
+    return { statusKey: "pending", statusText: raw || "Pending / چاوەڕێی کڕین", statusColor: "#f3f4f6", situation: raw };
+  }
+
+  for (var sheetIndex = 0; sheetIndex < sheetsToSearch.length; sheetIndex++) {
+    searchSheet = sheetsToSearch[sheetIndex];
+    var lastRow = searchSheet.getLastRow();
+    if (lastRow >= 4) {
+    // Columns A:T. Column T should contain the real purchase date from your system.
+    // Example: when situation changes to Purchased, set Column T to that exact purchase time.
+    var searchData = searchSheet.getRange(4, 1, lastRow - 3, 20).getValues();
+    var backgrounds = searchSheet.getRange(4, 1, lastRow - 3, 1).getBackgrounds();
+
+    var matchingItems = [];
+    var grandTotal = 0;
+    var fibPaid = 0;
+    var customerName = "";
+    var boxNumber = "";
+
+    for (var i = 0; i < searchData.length; i++) {
+      var bgColor = backgrounds[i][0].toLowerCase();
+      var rowPhoneStr = (searchData[i][8] || "").toString(); // Column I: Phone
+      var rowId = (i + 4).toString(); // Actual sheet row number / customer ID
+      var rowOrderNo = (searchData[i][11] || "").toString().replace(/\s/g, "").toLowerCase(); // Column L: optional order no
+      var rowSituation = (searchData[i][18] || "").toString(); // Column S: situation/status
+      var rowPurchasedAt = searchData[i][19] || ""; // Column T: purchase date/time
+      var foundPhoneMatch = false;
+      var phoneList = rowPhoneStr.split("/");
+      for (var p = 0; p < phoneList.length; p++) {
+        var purePhone = phoneList[p].replace(/\D/g, "");
+        if (purePhone.startsWith("00964")) purePhone = purePhone.substring(5);
+        if (purePhone.startsWith("964")) purePhone = purePhone.substring(3);
+        if (purePhone.startsWith("0")) purePhone = purePhone.substring(1);
+
+        if (purePhone.length >= 7 && (inputPhone.includes(purePhone) || purePhone.includes(inputPhone))) {
+          foundPhoneMatch = true;
+          break;
+        }
+      }
+
+      // Search by phone + row ID. Column L is kept as a backup if you still use it.
+      if (foundPhoneMatch && inputOrderId && (rowId === inputOrderId || rowOrderNo.includes(inputOrderId))) {
+        if (!customerName) customerName = searchData[i][1] || "Customer"; // Column B: Name
+        if (!boxNumber) boxNumber = (searchData[i][9] || "").toString().replace(/\D/g, ""); // Column J: Box number only
+
+        var itemPrice = parseFloat((searchData[i][4] || "0").toString().replace(/,/g, "").replace(/[^0-9.-]/g, "")) || 0;
+        var itemFib = parseFloat((searchData[i][13] || "0").toString().replace(/,/g, "").replace(/[^0-9.-]/g, "")) || 0;
+        var itemName = searchData[i][6] || "Item"; // Column G: Pics_text
+        var status = getSituationStatus(rowSituation);
+        if (bgColor === "#ffedd5") {
+          status = { statusKey: "delivered", statusText: "Delivered / Completed", statusColor: "#dcfce7", situation: rowSituation || "Delivered" };
+        }
+
+        grandTotal += itemPrice;
+        fibPaid += itemFib;
+
+        matchingItems.push({
+          itemName: itemName.toString(),
+          statusKey: status.statusKey,
+          statusText: status.statusText,
+          statusColor: status.statusColor,
+          situation: status.situation,
+          purchasedAt: rowPurchasedAt,
+          statusStartedAt: rowPurchasedAt,
+          sentAt: rowPurchasedAt
+        });
       }
     }
 
-    var sheetName = data.sheet || data.sheet_name || ACTIVE_SHEET_NAME;
+    if (matchingItems.length > 0) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        customerName: customerName,
+        boxNumber: boxNumber,
+        grandTotal: grandTotal,
+        fibPaid: fibPaid,
+        items: matchingItems
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    }
+  }
+
+  return ContentService.createTextOutput(JSON.stringify({ status: "not_found", message: "Order not found, or it has been completed and delivered." })).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+
+
+
+    var activeSheetName = getActiveSheetName();
+    if (data.action === "set_active_sheet") {
+      if ((data.role || "").toString().toLowerCase() !== "owner") {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Owner only" })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify(setActiveSheetName(data.sheet_name || data.sheet))).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var sheetName = data.sheet || data.sheet_name || activeSheetName;
 
     // ==========================================
     // --- 🔔 NOTIFICATIONS SYSTEM ---
@@ -177,6 +1104,7 @@ function doPost(e) {
        var ss = SpreadsheetApp.getActiveSpreadsheet();
        var sheet = ss.getSheetByName(sheetName);
        if (sheet) {
+           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
            if (data.image_url) {
                sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); // W (23)
                sheet.getRange(parseInt(data.row_id), 24).setValue(data.image_url); // X (24)
@@ -191,24 +1119,46 @@ function doPost(e) {
     if (data.action === "update_warning_picture" && data.row_id !== undefined) {
        var ss = SpreadsheetApp.getActiveSpreadsheet();
        var sheet = ss.getSheetByName(sheetName);
+       var warningUrl = data.image_url ? data.image_url.toString().trim() : "";
        if (sheet) {
-           if (data.image_url) {
-               sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + data.image_url + '")'); // Y (25)
+           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
+           if (warningUrl) {
+               sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + warningUrl.replace(/"/g, '""') + '")'); // Y (25)
            } else {
                sheet.getRange(parseInt(data.row_id), 25).clearContent(); // Safely clear warning image
            }
        }
-       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
-    }
+       return ContentService.createTextOutput(JSON.stringify({
+         status: "success",
+         warningBase64: warningUrl,
+         warningImageUrl: warningUrl
+       })).setMimeType(ContentService.MimeType.JSON);
+     }
 
     if (data.action === "update_primary_picture" && data.row_id && data.primary_urls) {
        var ss = SpreadsheetApp.getActiveSpreadsheet();
        var sheet = ss.getSheetByName(sheetName);
        if (sheet) {
+           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
            sheet.getRange(parseInt(data.row_id), 22).setFormula('=IMAGE("' + data.primary_urls.split(",")[0] + '")'); // V (22)
            sheet.getRange(parseInt(data.row_id), 27).setValue(data.primary_urls); // AA (27)
        }
        return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "update_price" && data.row_id) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(sheetName);
+      if (sheet) {
+        if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
+        var priceValue = data.value !== undefined ? data.value : data.price;
+        if (priceValue === "" || priceValue === null || priceValue === undefined) {
+          sheet.getRange(parseInt(data.row_id), 5).clearContent();
+        } else {
+          sheet.getRange(parseInt(data.row_id), 5).setValue(priceValue).setNumberFormat("#,##0");
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (data.action === "update_box_cost") {
@@ -216,9 +1166,10 @@ function doPost(e) {
       var sheet = ss.getSheetByName(sheetName);
       if (sheet) {
         var valueToWrite = data.value !== undefined ? data.value : data.box_cost;
+        var numericValueToWrite = parseMoneyValue(valueToWrite);
         if (data.row_ids && Array.isArray(data.row_ids)) {
-          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 6).setValue(valueToWrite);
-        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 6).setValue(valueToWrite); }
+          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 6).setNumberFormat("#,##0").setValue(numericValueToWrite); }
+        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 6).setNumberFormat("#,##0").setValue(numericValueToWrite); }
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
@@ -227,11 +1178,44 @@ function doPost(e) {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var sheet = ss.getSheetByName(sheetName);
       if (sheet) {
+        var shippingValueToWrite = parseMoneyValue(data.value);
         if (data.row_ids && Array.isArray(data.row_ids)) {
-          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 8).setValue(data.value);
-        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 8).setValue(data.value); }
+          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 8).setNumberFormat("#,##0").setValue(shippingValueToWrite); }
+        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 8).setNumberFormat("#,##0").setValue(shippingValueToWrite); }
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "update_box_field_once") {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(sheetName);
+      var fieldCols = { box_cost: 6, shipping_cost: 8, lost: 11, profit: 12 };
+      var col = fieldCols[data.field];
+      if (!sheet || !col) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid box field" })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []);
+      for (var i = 0; i < rowIds.length; i++) {
+        var row = parseInt(rowIds[i], 10);
+        if (!row || row < 4 || row > MAX_ROW_LIMIT) continue;
+        if (isFinishedRow(sheet, row)) continue;
+        var cell = sheet.getRange(row, col);
+        if (i === 0) {
+          if (data.value === "" || data.value === null || data.value === undefined) {
+            cell.clearContent();
+            cell.setNumberFormat("#,##0");
+          } else {
+            cell.setValue(parseMoneyValue(data.value));
+            cell.setNumberFormat("#,##0");
+          }
+        } else {
+          cell.clearContent();
+          cell.setNumberFormat("#,##0");
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (data.action === "update_box_name") {
@@ -239,17 +1223,42 @@ function doPost(e) {
       var sheet = ss.getSheetByName(sheetName);
       if (sheet) {
         if (data.row_ids && Array.isArray(data.row_ids)) {
-          for (var i = 0; i < data.row_ids.length; i++) sheet.getRange(parseInt(data.row_ids[i]), 10).setValue(data.box_name);
-        } else if (data.row_id) { sheet.getRange(parseInt(data.row_id), 10).setValue(data.box_name); }
+          for (var i = 0; i < data.row_ids.length; i++) { if (!isFinishedRow(sheet, data.row_ids[i])) sheet.getRange(parseInt(data.row_ids[i]), 10).setValue(data.box_name); }
+        } else if (data.row_id && !isFinishedRow(sheet, data.row_id)) { sheet.getRange(parseInt(data.row_id), 10).setValue(data.box_name); }
+      }
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "make_box_finished") {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(sheetName);
+      if (sheet) {
+        var color = data.finished === false || data.finished === "false" ? null : FINISHED_BOX_COLOR;
+        var rowIds = data.row_ids && Array.isArray(data.row_ids) ? data.row_ids : (data.row_id ? [data.row_id] : []);
+        for (var i = 0; i < rowIds.length; i++) {
+          var r = parseInt(rowIds[i]);
+          if (r >= 4) sheet.getRange(r, 1, 1, 19).setBackground(color);
+        }
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (data.action === "delete" && data.row_id) {
+       var ssDel = SpreadsheetApp.getActiveSpreadsheet();
+       var sheetDel = ssDel.getSheetByName(sheetName);
+       if (sheetDel && isFinishedRow(sheetDel, data.row_id)) return lockedResponse(data.row_id);
        var result = deleteOrder(data.row_id, sheetName, data.linkedOrderIds);
        return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
     }
     
+    if (data.action === "unlink_order" && data.row_id) {
+       var targetSheetName = data.target_sheet || data.sheet || data.sheet_name || sheetName;
+       var targetRef = normalizeOrderRef(data.row_id, targetSheetName);
+       var clusterRefs = data.cluster_refs || data.linkedOrderIds || [];
+       var result = unlinkOrderFromCluster(targetRef, clusterRefs);
+       return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (data.action === "merge_buying_price" && data.row_ids) {
        var result = mergeBuyingPrice(sheetName, data.row_ids, data.price, data.shipping);
        return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
@@ -263,6 +1272,7 @@ function doPost(e) {
     if (data.action === "verifyOrder" && data.row_id) {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var sheet = ss.getSheetByName(sheetName);
+      if (sheet && isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
       if (sheet) applyStatusColor(sheet, parseInt(data.row_id), data.matchStatus);
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
@@ -271,21 +1281,27 @@ function doPost(e) {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var sheet = ss.getSheetByName(sheetName);
       if (sheet) {
+        if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
         applyStatusColor(sheet, parseInt(data.row_id), data.missing === true || data.missing === "true" ? "missing" : null);
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // --- FIX APPLIED IN THIS TELEGRAM WEBHOOK BLOCK ---
     if (data.order_update) {
       var notificationText = data.order_update;
       var cleanNotifNumbers = notificationText.replace(/\D/g, '');
       var statusColor = "";
+      var isCancelledStatus = false;
+      if (notificationText.includes("گەیشتووە")) {
+        statusColor = "#dcfce7";
+      } else if (notificationText.includes("نایەوێت")) {
+        statusColor = "#fee2e2";
+        isCancelledStatus = true;
+      }
       
-      if (notificationText.includes("گەیشتووە")) statusColor = "#dcfce7";
-      else if (notificationText.includes("نایەوێت")) statusColor = "#fee2e2";
-
       if (statusColor !== "") {
-        var activeSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ACTIVE_SHEET_NAME);
+        var activeSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(activeSheetName);
         var lastRow = activeSheet.getLastRow();
         if (lastRow >= 4) {
           var phoneValues = activeSheet.getRange(4, 9, lastRow - 3, 1).getValues();
@@ -308,8 +1324,10 @@ function doPost(e) {
             if (foundRow !== -1) break;
           }
           if (foundRow !== -1) {
+            if (isFinishedRow(activeSheet, foundRow)) return lockedResponse(foundRow);
             activeSheet.getRangeList(['A' + foundRow, 'B' + foundRow, 'C' + foundRow, 'E' + foundRow, 'G' + foundRow, 'I' + foundRow]).setBackground(statusColor);
-            if (statusColor === "#fee2e2") {
+            
+            if (isCancelledStatus) {
               var priceVal = activeSheet.getRange(foundRow, 5).getValue() || 0;
               activeSheet.getRange(foundRow, 5).clearContent();
               var extraRange = activeSheet.getRange(foundRow, 19);
@@ -325,16 +1343,28 @@ function doPost(e) {
       return ContentService.createTextOutput("Ignored");
     }
 
-    var result = handleOrder(data, sheetName);
-    
     if (data.status_color && data.row_id) {
       try {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
         var sheet = ss.getSheetByName(sheetName);
         if (sheet) {
-          applyStatusColor(sheet, parseInt(data.row_id), data.status_color);
+          var statusRow = parseInt(data.row_id);
+          if (isFinishedRow(sheet, statusRow)) return lockedResponse(statusRow);
+          var statusKey = normalizeStatusKey(data.status_color);
+          var statusRows = getCompleteLinkedRows(sheet, [statusRow], sheetName);
+          if (statusRows.length === 0) statusRows = [statusRow];
+          for (var sr = 0; sr < statusRows.length; sr++) {
+            var linkedStatusRow = statusRows[sr];
+            if (isFinishedRow(sheet, linkedStatusRow)) continue;
+            applyStatusColor(sheet, linkedStatusRow, data.status_color);
+            var currentExtraForStatus = sheet.getRange(linkedStatusRow, 19).getValue().toString();
+            var nextExtraForStatus = linkedStatusRow === statusRow && data.extra !== undefined
+              ? data.extra
+              : setStatusTag(currentExtraForStatus, statusKey);
+            sheet.getRange(linkedStatusRow, 19).setValue(setStatusTag(nextExtraForStatus, statusKey));
+          }
           if (data.status_color === "cancelled" || data.status_color === "#fee2e2") {
-            var targetR = parseInt(data.row_id);
+            var targetR = statusRow;
             var manualPriceVal = sheet.getRange(targetR, 5).getValue() || 0;
             sheet.getRange(targetR, 5).clearContent();
             var manualExtraRange = sheet.getRange(targetR, 19);
@@ -345,22 +1375,51 @@ function doPost(e) {
           }
         }
       } catch(ex) {}
+      return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
+
+    var result = handleOrder(data, sheetName);
     
     return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({'result': 'error', 'message': error.toString()})).setMimeType(ContentService.MimeType.JSON);
-  } finally { lock.releaseLock(); }
+  } finally { lock.releaseLock();
+  }
 }
 
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var activeSheetName = getActiveSheetName();
     var allData = [];
     var monthlyStats = {};
     var allSheetNames = [];
     
     var params = e && e.parameter ? e.parameter : {};
+    var earlyGiftCardResponse = handleGiftCardAction(params);
+    if (earlyGiftCardResponse) return earlyGiftCardResponse;
+    var earlyBoxLinkResponse = handleBoxLinkAction(params);
+    if (earlyBoxLinkResponse) return earlyBoxLinkResponse;
+    if (params.action === "get_auth_users") {
+      var authSheet = ss.getSheetByName("Auth");
+      var users = [];
+      var rolesByRow = {
+        3: "owner",
+        4: "admin",
+        5: "moderator",
+        6: "moderator",
+        7: "moderator",
+        8: "moderator",
+        9: "delivery"
+      };
+      if (authSheet) {
+        for (var row = 3; row <= 9; row++) {
+          var username = authSheet.getRange(row, 1).getValue().toString().trim();
+          if (username) users.push({ username: username, role: rolesByRow[row] });
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", users: users })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     // --- 🔔 NOTIFICATIONS SYSTEM (GET) ---
     if (params.action === "get_notifications") {
@@ -374,10 +1433,12 @@ function doGet(e) {
                 for (var i = 0; i < dataRows.length; i++) {
                     var r = dataRows[i];
                     var readByArr = [];
-                    try { readByArr = JSON.parse(r[8] || "[]"); } catch(e) {}
+                    try { readByArr = JSON.parse(r[8] || "[]");
+                    } catch(e) {}
                     notifications.push({
                         id: r[0], type: r[1], message: r[2], senderRole: r[3], 
                         targetRoles: (r[4] || "").toString().split(","), orderId: r[5], orderSheet: r[6], 
+              
                         timestamp: r[7], readBy: readByArr, isWarning: r[9] === "true", 
                         isFixed: r[10] === "true", fixedBy: r[11]
                     });
@@ -386,10 +1447,14 @@ function doGet(e) {
         }
         return ContentService.createTextOutput(JSON.stringify({ status: "success", notifications: notifications.reverse() })).setMimeType(ContentService.MimeType.JSON);
     }
-    
-    var requestedMonth = params.month;
-    var loadAllLocal = params.load_all_local === 'true';
-    var loadActiveOnly = !requestedMonth && !loadAllLocal;
+
+    if (params.action === "get_orders") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", orders: readOrdersLog(ss) })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+var requestedMonth = params.month;
+var loadAllLocal = false;
+var loadActiveOnly = !requestedMonth && !loadAllLocal;
 
     for (var x = 0; x < EXTERNAL_SOURCES.length; x++) {
       var source = EXTERNAL_SOURCES[x];
@@ -401,7 +1466,6 @@ function doGet(e) {
           var extRev = parseFloat(extSheet.getRange(source.priceCell).getValue()) || 0;
           var extBal = parseFloat(extSheet.getRange(source.balanceCell).getValue()) || 0;
           var cBuy = 0, cWgt = 0, cEtc = 0, extLost = 0;
-
           if (source.costBuyRange) cBuy = sumRange(extSheet, source.costBuyRange);
           else if (source.costBuyCell) cBuy = parseFloat(extSheet.getRange(source.costBuyCell).getValue()) || 0;
           
@@ -411,20 +1475,23 @@ function doGet(e) {
           if (source.costEtcRange) cEtc = sumRange(extSheet, source.costEtcRange);
           else if (source.costEtcCell) cEtc = parseFloat(extSheet.getRange(source.costEtcCell).getValue()) || 0;
 
-          try { extLost = parseFloat(extSheet.getRange("K3").getValue()) || 0; } catch(err){}
+          try { extLost = parseFloat(extSheet.getRange("K3").getValue()) || 0;
+          } catch(err){}
 
           var sheetCount = 0;
-          if (requestedMonth === source.name || (loadActiveOnly && source.name === ACTIVE_SHEET_NAME)) {
-             var extData = readSheetData(extSheet, source.name);
-             allData = allData.concat(extData);
-             sheetCount = extData.length;
-          } else {
-             if (MANUAL_COUNTS[source.name]) { sheetCount = MANUAL_COUNTS[source.name]; } 
+          if (requestedMonth === source.name || (loadActiveOnly && source.name === activeSheetName)) {
+   var extData = readSheetData(extSheet, source.name);
+   allData = allData.concat(extData);
+   sheetCount = extData.length;
+} else {
+             if (MANUAL_COUNTS[source.name]) { sheetCount = MANUAL_COUNTS[source.name];
+             } 
              else { sheetCount = (extRev > 0 || extBal > 0) ? 1 : 0; }
           }
           monthlyStats[source.name] = { revenue: extRev, balance: extBal, buy: cBuy, wgt: cWgt, etc: cEtc, lost: extLost, count: sheetCount };
         }
-      } catch (err) { console.log("Error external: " + source.name); }
+      } catch (err) { console.log("Error external: " + source.name);
+      }
     }
 
     for (var s = 0; s < LOCAL_SHEETS.length; s++) {
@@ -452,21 +1519,23 @@ function doGet(e) {
             } catch(err) {}
 
             var sheetCount = 0;
-            if (loadAllLocal || requestedMonth === sName || (loadActiveOnly && sName === ACTIVE_SHEET_NAME)) {
-               var sheetData = readSheetData(sheet, sName);
-               allData = allData.concat(sheetData);
-               sheetCount = sheetData.length;
-            } else {
-               if (MANUAL_COUNTS[sName]) { sheetCount = MANUAL_COUNTS[sName]; }
+           if (requestedMonth === sName || (loadActiveOnly && sName === activeSheetName)) {
+   var sheetData = readSheetData(sheet, sName);
+   allData = allData.concat(sheetData);
+   sheetCount = sheetData.length;
+} else {
+               if (MANUAL_COUNTS[sName]) { sheetCount = MANUAL_COUNTS[sName];
+               }
                else { var lastR = sheet.getLastRow();
-               if (lastR >= 4) { sheetCount = lastR - 3; } else { sheetCount = 0; } }
+               if (lastR >= 4) { sheetCount = lastR - 3; } else { sheetCount = 0;
+               } }
             }
             monthlyStats[sName] = { revenue: parseFloat(rev)||0, balance: parseFloat(bal)||0, buy: parseFloat(cBuy)||0, wgt: parseFloat(cWgt)||0, etc: parseFloat(cEtc)||0, lost: parseFloat(lost)||0, count: sheetCount };
         }
       }
     }
     
-    var response = { status: "success", data: allData, meta: { active_sheet: ACTIVE_SHEET_NAME, monthly_stats: monthlyStats, all_months: allSheetNames } };
+    var response = { status: "success", data: allData, meta: { active_sheet: activeSheetName, monthly_stats: monthlyStats, all_months: allSheetNames } };
     return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() })).setMimeType(ContentService.MimeType.JSON);
@@ -479,7 +1548,72 @@ function sumRange(sheet, rangeA1) {
     var total = 0;
     for(var i=0; i<values.length; i++) total += (parseFloat(values[i]) || 0);
     return total;
-  } catch(e) { return 0; }
+  } catch(e) { return 0;
+  }
+}
+
+function unlinkOrderFromCluster(targetRef, clusterRefs) {
+  var targetParts = (targetRef || "").toString().split(":");
+  if (targetParts.length < 2) return { 'result': 'error', 'message': 'Invalid target order.' };
+  var targetRow = parseInt(targetParts[0], 10);
+  var targetSheetName = targetParts.slice(1).join(":");
+  if (!targetRow || !targetSheetName) return { 'result': 'error', 'message': 'Invalid target order.' };
+
+  var refs = parseLinkedCellTokens(clusterRefs || []);
+  var seen = {};
+  var orders = [];
+  function addRef(ref) {
+    var parts = (ref || "").toString().replace(/^!/, "").split(":");
+    if (parts.length < 2) return;
+    var row = parseInt(parts[0], 10);
+    var sheetName = parts.slice(1).join(":");
+    if (!row || !sheetName) return;
+    var key = normalizeOrderRef(row, sheetName);
+    if (seen[key]) return;
+    seen[key] = true;
+    orders.push({ row: row, sheetName: sheetName, key: key });
+  }
+
+  addRef(targetRef);
+  for (var i = 0; i < refs.length; i++) addRef(refs[i]);
+
+  var remaining = orders.filter(function(o) { return o.key !== normalizeOrderRef(targetRow, targetSheetName); });
+  var targetSheet = getOrderSheetByName(targetSheetName);
+  if (targetSheet) {
+    var targetBlocks = remaining.map(function(o) { return "!" + o.key; });
+    writeOrderLinkRefs(targetSheet, targetRow, targetBlocks);
+  }
+
+  for (var r = 0; r < remaining.length; r++) {
+    var current = remaining[r];
+    var sheet = getOrderSheetByName(current.sheetName);
+    if (!sheet) continue;
+    var links = remaining
+      .filter(function(o) { return o.key !== current.key; })
+      .map(function(o) { return o.key; });
+    links.push("!" + normalizeOrderRef(targetRow, targetSheetName));
+    writeOrderLinkRefs(sheet, current.row, links);
+  }
+
+  return { 'result': 'success', 'status': 'success', 'message': 'Order unlinked successfully.' };
+}
+
+function readOrdersLog(ss) {
+  var logSheet = ss.getSheetByName("Orders");
+  if (!logSheet || logSheet.getLastRow() < 2) return [];
+  var lastRow = logSheet.getLastRow();
+  var lastCol = logSheet.getLastColumn();
+  var headers = logSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var values = logSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var orders = [];
+  for (var i = 0; i < values.length; i++) {
+    var rowObj = {};
+    for (var c = 0; c < headers.length; c++) {
+      if (headers[c]) rowObj[headers[c]] = values[i][c];
+    }
+    orders.push(rowObj);
+  }
+  return orders;
 }
 
 function readSheetData(sheet, sheetName) {
@@ -488,9 +1622,41 @@ function readSheetData(sheet, sheetName) {
   var lastRow = sheet.getLastRow();
   if (lastRow > MAX_ROW_LIMIT) lastRow = MAX_ROW_LIMIT;
   if (lastRow < 4) return [];
-  var dataRange = sheet.getRange(4, 1, lastRow - 3, 28);
+  var dataRange = sheet.getRange(4, 1, lastRow - 3, 33);
   var values = dataRange.getValues();
+  var displayValues = dataRange.getDisplayValues();
   var formulas = dataRange.getFormulas();
+  var backgrounds = dataRange.getBackgrounds();
+  var rowLinks = {};
+  for (var linkScan = 0; linkScan < values.length; linkScan++) {
+    var scanRowIndex = linkScan + 4;
+    rowLinks[scanRowIndex] = parseLinkedRowIds(values[linkScan][27], sheetName);
+  }
+
+  function collectLinkedGroupForRead(seedRow) {
+    var queue = [seedRow];
+    var seen = {};
+    seen[seedRow] = true;
+    var pos = 0;
+    while (pos < queue.length) {
+      var current = queue[pos++];
+      var links = rowLinks[current] || [];
+      for (var li = 0; li < links.length; li++) {
+        if (!seen[links[li]]) {
+          seen[links[li]] = true;
+          queue.push(links[li]);
+        }
+      }
+      for (var otherRow in rowLinks) {
+        if (rowLinks[otherRow].indexOf(current) > -1 && !seen[otherRow]) {
+          seen[otherRow] = true;
+          queue.push(parseInt(otherRow, 10));
+        }
+      }
+    }
+    queue.sort(function(a, b) { return a - b; });
+    return queue;
+  }
   
   var jsonData = [];
   for (var i = 0; i < values.length; i++) {
@@ -498,18 +1664,31 @@ function readSheetData(sheet, sheetName) {
     var rowIndex = i + 4;
     
     var noteVal = row[17] ? row[17].toString() : "";
-    var extraValue = row[18] ? row[18].toString() : "";
+    var extraValue = row[18] ?
+    row[18].toString() : "";
     var orderNoValue = extraValue !== "" ? extraValue : "Pending";
-    var linkedIdsStr = row[27] ? row[27].toString() : "";
-    var linkedIds = [];
-    if (linkedIdsStr) { linkedIds = linkedIdsStr.split(',').map(function(id) { return id.trim(); }).filter(function(id) { return id; }); }
+    var linkedIds = collectLinkedGroupForRead(rowIndex)
+      .filter(function(id) { return id !== rowIndex; })
+      .map(function(id) { return normalizeOrderRef(id, sheetName); });
+    var rawLinkedTokens = parseLinkedCellTokens(row[27]);
+    for (var rt = 0; rt < rawLinkedTokens.length; rt++) {
+      var rawToken = rawLinkedTokens[rt];
+      if ((rawToken.charAt(0) === "!" || rawToken.indexOf(":") > -1) && linkedIds.indexOf(rawToken) === -1) {
+        linkedIds.push(rawToken);
+      }
+    }
 
     var dateVal = "Unknown Date";
+    var displayDate = displayValues[i][16] ? displayValues[i][16].toString() : "";
     var rawDate = row[16];
-    if (rawDate) {
+    if (displayDate) {
+        dateVal = displayDate;
+    } else if (rawDate) {
         try { var d = new Date(rawDate);
-        if (!isNaN(d.getTime())) { dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); } else { dateVal = rawDate.toString(); }
-        } catch(e) { dateVal = rawDate.toString(); }
+        if (!isNaN(d.getTime())) { dateVal = Utilities.formatDate(d, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); } else { dateVal = rawDate.toString();
+        }
+        } catch(e) { dateVal = rawDate.toString();
+        }
     }
 
     var primaryImgUrl = "";
@@ -525,30 +1704,42 @@ function readSheetData(sheet, sheetName) {
     }
     
     var warningImgUrl = "";
-    if (formulas[i][24] && formulas[i][24].indexOf("http") > -1) {
-        var m2 = formulas[i][24].match(/"(https?:\/\/[^\s!@#$%^&*()_+={}\[\]|\\:;'<>,.?\/]+)"/);
+    var warningCellValue = row[24] ? row[24].toString() : "";
+    if (warningCellValue && warningCellValue.indexOf("http") > -1) {
+        var warningValueMatch = warningCellValue.match(/https?:\/\/[^\s"'<>]+/);
+        if (warningValueMatch) warningImgUrl = warningValueMatch[0];
+    }
+    if (!warningImgUrl && formulas[i][24] && formulas[i][24].indexOf("http") > -1) {
+        var m2 = formulas[i][24].match(/"(https?:\/\/[^"]+)"/);
         if (m2) warningImgUrl = m2[1];
+        if (!warningImgUrl) {
+          var m2Fallback = formulas[i][24].match(/https?:\/\/[^\s"')]+/);
+          if (m2Fallback) warningImgUrl = m2Fallback[0];
+        }
     }
 
     var proofUrlsArray = proofImgUrl ? proofImgUrl.split(",") : [];
-
     if (row[1] || row[8]) {
       jsonData.push({
         insta: row[0], name: row[1], place: row[2], fib: row[3], price: row[4],
-        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", phone: row[8] != null ? row[8].toString() : "", 
+        box_cost: row[5], pics_text: row[6] != null ? row[6].toString() : "", shipping_cost: row[7], phone: row[8] != null ? row[8].toString() : "", 
         box_name: row[9] != null ? row[9].toString() : "", lost: row[10], profit: row[11], 
         extra: extraValue, note: noteVal, link: (row[15] || ""), initial_payment: row[13], 
-        date: dateVal, orderNo: orderNoValue, trackNo: (row[12] || ""), 
-        
-        warningBase64: warningImgUrl, 
+       
+         date: dateVal, orderNo: orderNoValue, trackNo: (row[12] || ""), 
+        warningBase64: warningImgUrl,
+        warningImageUrl: warningImgUrl,
+        warning_url: warningImgUrl,
         image_url: proofImgUrl, 
         proof_urls: proofUrlsArray, 
-       
         primary_urls: primaryImgUrl, 
-  
+        unique_order_id: row[30] || "",
+        admin_name: row[31] || "",
+        admin_role: row[32] || "",
         id: rowIndex, sheet_name: sheetName,
+        is_finished: backgrounds[i][0] === FINISHED_BOX_COLOR,
         linkedOrderIds: linkedIds
-      });
+       });
     }
   }
   return jsonData;
@@ -557,47 +1748,128 @@ function readSheetData(sheet, sheetName) {
 function transliterateToLatini(text) {
   if (!text) return "";
   var str = text.toString();
-  var dictionary = { "هەولێر": "Erbil","هەولیر": "Erbil", "هەولێری": "Erbil", "Hawler": "Erbil", "Hewler": "Erbil","Erbil": "Erbil", "سلێمانی": "Slemani","سلیمانی": "Slemani", "سلێمانى": "Slemani", "Slemani": "Slemani", "Sulaymaniyah": "Slemani","دهۆک": "Duhok","دهوك": "Duhok", "دهۆك": "Duhok", "Duhok": "Duhok","کەرکووک": "Kirkuk","کەرکوک": "Kirkuk","كركوك": "Kirkuk","كەرکوک": "Kirkuk", "Kirkuk": "Kirkuk","kirkuk": "Kirkuk", "karkuk": "Kirkuk", "هەڵەبجە": "Halabja","هەڵەبجه": "Halabja", "Halabja": "Halabja","زاخۆ": "Zakho","زاخو": "Zakho", "Zakho": "Zakho", "سۆران": "Soran","سوران": "Soran","Soran": "Soran","عەنکاوە": "Ankawa","عەنكاوە": "Ankawa","Ankawa": "Ankawa","هەڤاڵان": "Havalan","هەڤالان": "Havalan", "Havalan": "Havalan", "بەختیاری": "Bakhtyari", "Bakhtyari": "Bakhtyari","شۆڕش": "Shorish", "شورش": "Shorish","Shorish": "Shorish","تەیراوە": "Tayrawa","تەیراوه": "Tayrawa", "Tayrawa": "Tayrawa", "ئیسکان": "Iskan","اسکان": "Iskan","Iskan": "Iskan","نازناز": "Naznaz","Naznaz": "Naznaz", "سەربەستی": "Sarbasti","سربستی": "Sarbasti", "Sarbasti": "Sarbasti","فەرمانبەران": "Farmanbaran","فرمانبەران": "Farmanbaran", "Farmanbaran": "Farmanbaran", "هەولێری نوێ": "Hawlere Nwe", "هەولێری نوی": "Hawlere Nwe","Hawlere Nwe": "Hawlere Nwe","حەسارۆک": "Hasarok","حسارۆك": "Hasarok", "Hasarok": "Hasarok","ئارێز": "Arezna","ارێز": "Arezna","Arez": "Arezna","گەلاوێژ": "Galawezh", "گەلاویژ": "Galawezh","Galawezh": "Galawezh"};
+  var dictionary = { "هەولێر": "Erbil","هەولیر": "Erbil", "هەولێری": "Erbil", "Hawler": "Erbil", "Hewler": "Erbil","Erbil": "Erbil", "سلێمانی": "Slemani","سلیمانی": "Slemani", "سلێmanى": "Slemani", "Slemani": "Slemani", "Sulaymaniyah": "Slemani","دهۆک": "Duhok","دهوك": "Duhok", "دهۆك": "Duhok", "Duhok": "Duhok","کەرکووک": "Kirkuk","کەرکوک": "Kirkuk","كركوك": "Kirkuk","كەرکوک": "Kirkuk", "Kirkuk": "Kirkuk","kirkuk": "Kirkuk", "karkuk": "Kirkuk", "هەڵەبجە": "Halabja","هەڵەبجه": "Halabja", "Halabja": "Halabja","زاخۆ": "Zakho","زاخو": "Zakho", "Zakho": "Zakho", "سۆران": "Soran","سوران": "Soran","Soran": "Soran","عەنکاوە": "Ankawa","عەنكاوە": "Ankawa","Ankawa": "Ankawa","هەڤاڵان": "Havalan","هەڤالان": "Havalan", "Havalan": "Havalan", "بەختیاری": "Bakhtyari", "Bakhtyari": "Bakhtyari","شۆڕش": "Shorish", "شورش": "Shorish","Shorish": "Shorish","تەیراوە": "Tayrawa","تەیراوه": "Tayrawa", "Tayrawa": "Tayrawa", "ئیسکان": "Iskan","اسکان": "Iskan","Iskan": "Iskan","نازناز": "Naznaz","Naznaz": "Naznaz", "سەربەستی": "Sarbasti","سربستی": "Sarbasti", "Sarbasti": "Sarbasti","فەرمانبەران": "Farmanbaran","فرمانبەران": "Farmanbaran", "Farmanbaran": "Farmanbaran", "هەولێری نوێ": "Hawlere Nwe", "هەولێری نوی": "Hawlere Nwe","Hawlere Nwe": "Hawlere Nwe","حەسارۆک": "Hasarok","حسارۆك": "Hasarok", "Hasarok": "Hasarok","ئارێز": 
+"Arezna","ارێز": "Arezna","Arez": "Arezna","گەلاوێژ": "Galawezh", "گەلاویژ": "Galawezh","Galawezh": "Galawezh"};
   for (var key in dictionary) { var re = new RegExp(key, "g");
-  str = str.replace(re, dictionary[key]); }
-  var charMap = { 'ا': 'a', 'آ': 'a', 'أ': 'a', 'إ': 'e', 'ب': 'b', 'پ': 'p', 'ت': 't', 'ث': 's', 'ج': 'j', 'چ': 'ch', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'z', 'ر': 'r', 'ڕ': 'r', 'ز': 'z', 'ژ': 'zh', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'z', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ڤ': 'v', 'ق': 'q', 'ک': 'k', 'ك': 'k', 'گ': 'g', 'ل': 'l', 'ڵ': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'ە': 'e', 'و': 'w', 'ۆ': 'o', 'ۇ': 'u', 'وو': 'u', 'ی': 'y', 'ێ': 'e', 'ى': 'a', 'ي': 'y', 'ئ': '', 'ؤ': 'o', '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '؟': '?', '،': ',' };
+  str = str.replace(re, dictionary[key]);
+  }
+  var charMap = { 'ا': 'a', 'آ': 'a', 'أ': 'a', 'إ': 'e', 'ب': 'b', 'پ': 'p', 'ت': 't', 'ث': 's', 'ج': 'j', 'چ': 'ch', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'z', 'ر': 'r', 'ڕ': 'r', 'ز': 'z', 'ژ': 'zh', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'z', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ڤ': 'v', 'ق': 'q', 'ک': 'k', 'ك': 'k', 'گ': 'g', 'ل': 'l', 'ڵ': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'ە': 'e', 'و': 'w', 'ۆ': 'o', 'ۇ': 'u', 'وو': 'u', 'ی': 'y', 'ێ': 'e', 'ى': 'a', 
+'ي': 'y', 'ئ': '', 'ؤ': 'o', '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '؟': '?', '،': ',' };
   var latiniStr = "";
   for (var i = 0; i < str.length; i++) { var char = str[i];
   latiniStr += (charMap[char] !== undefined) ? charMap[char] : char; }
   return latiniStr;
 }
 
+function getShippingForPlace(place) {
+  var placeText = (place || "").toString().trim().toLowerCase();
+  if (placeText === "no location" || placeText === "-") return 0;
+  if (placeText.includes("erbil") || placeText.includes("hawler") || placeText.includes("hewler")) return 3000;
+  if (placeText.includes("iraq") || placeText.includes("outside kurdistan")) return 6000;
+  return 5000;
+}
+
+function getOrCreateOrdersLogSheet(ss) {
+  var logSheet = ss.getSheetByName("Orders");
+  if (!logSheet) logSheet = ss.insertSheet("Orders");
+  var headers = [
+    "Timestamp", "UniqueOrderID", "ProcessedSheet", "ProcessedRow", "Insta",
+    "Name", "Place", "Phone", "Phone2", "Fib", "RawItems", "RawLink",
+    "RawUnadjustedPrice", "InitialPayment", "Note", "Extra", "BoxName",
+    "PrimaryURLs", "ProofURLs", "LinkedOrderIds", "ClientRequestID", "SubmittedBy", "SubmittedRole", "RawPayload"
+  ];
+  var currentHeader = logSheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var needsHeader = true;
+  for (var i = 0; i < currentHeader.length; i++) {
+    if (currentHeader[i]) { needsHeader = false; break; }
+  }
+  if (needsHeader || currentHeader[headers.length - 1] !== headers[headers.length - 1]) {
+    logSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    logSheet.setFrozenRows(1);
+  }
+  return logSheet;
+}
+
+function appendRawOrderLog(ss, data, sheetName, targetRow, uniqueOrderId) {
+  var logSheet = getOrCreateOrdersLogSheet(ss);
+  var now = new Date();
+  var timestamp = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  var rawPrice = data.customer_price || data.price_iqd || data["price (IQD)"] || data.price || "";
+  var rawItems = data.items || data.raw_items || data.pics_text || data.item || data.link || "";
+  logSheet.appendRow([
+    timestamp,
+    uniqueOrderId,
+    sheetName,
+    targetRow,
+    data.insta || "",
+    data.name || "",
+    data.place || "",
+    data.phone || "",
+    data.phone2 || "",
+    data.fib || "",
+    typeof rawItems === "object" ? JSON.stringify(rawItems) : rawItems,
+    data.link || "",
+    typeof rawPrice === "object" ? JSON.stringify(rawPrice) : rawPrice,
+    data.initial_payment || "",
+    data.note || data.customer_note || "",
+    data.extra || "",
+    data.box_name || "",
+    data.primary_urls || "",
+    data.proof_urls || "",
+    data.linkedOrderIds ? JSON.stringify(data.linkedOrderIds) : "",
+    data.client_request_id || "",
+    data.admin_name || data.submitted_by || "",
+    data.admin_role || data.submitted_role || "",
+    JSON.stringify(data)
+  ]);
+}
+
 function handleOrder(data, sheetName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) { try { sheet = ss.insertSheet(sheetName); } catch(e) { return { 'result': 'error', 'message': 'Could not create sheet: ' + sheetName }; } }
+  if (!sheet) { try { sheet = ss.insertSheet(sheetName);
+  } catch(e) { return { 'result': 'error', 'message': 'Could not create sheet: ' + sheetName };
+  } }
   
   var targetRow;
   var isUpdate = false;
   var isLinkedNewOrder = false;
   var baseLinkedRow = -1;
+  var incomingLinkedRows = parseLinkedRowIds(data.linkedOrderIds || [], sheetName);
+  var incomingLinkedRefs = parseOrderLinkRefs(data.linkedOrderIds || [], sheetName);
+  var existingRequestRow = (!data.row_id && data.client_request_id) ? findRowByClientRequestId(sheet, data.client_request_id) : -1;
   if (data.row_id && data.row_id != "") {
     targetRow = parseInt(data.row_id);
     isUpdate = true;
-  } else if (data.linkedOrderIds && data.linkedOrderIds.length > 0) {
+  } else if (existingRequestRow > -1) {
+    targetRow = existingRequestRow;
+    isUpdate = true;
+  } else if (incomingLinkedRefs.length > 0) {
     isLinkedNewOrder = true;
-    baseLinkedRow = parseInt(data.linkedOrderIds[0]);
-    var endRow = baseLinkedRow; 
-    sheet.insertRowAfter(endRow);
-    targetRow = endRow + 1;
+    baseLinkedRow = incomingLinkedRefs[0].row;
+    targetRow = getNextOrderRow(sheet);
   } else {
-    var startRow = 4;
-    var lastRowInSheet = sheet.getLastRow();
-    if (lastRowInSheet > MAX_ROW_LIMIT) lastRowInSheet = MAX_ROW_LIMIT;
-    targetRow = startRow;
-    if (lastRowInSheet >= startRow) {
-      var columnValues = sheet.getRange(startRow, 5, lastRowInSheet - startRow + 1, 1).getValues();
-      var maxIndex = -1;
-      for (var i = 0; i < columnValues.length; i++) { if (columnValues[i][0] !== "") maxIndex = i; }
-      targetRow = startRow + maxIndex + 1;
-    }
+    targetRow = getNextOrderRow(sheet);
   }
   if (targetRow > MAX_ROW_LIMIT) return { 'result': 'error', 'message': 'Sheet Full!' };
+  if (isUpdate && isFinishedRow(sheet, targetRow)) {
+    return { 'result': 'locked', 'status': 'locked', 'message': 'Row ' + targetRow + ' is finished and can only be changed manually in the sheet.'
+    };
+  }
+  var savedDateValue = isUpdate ? sheet.getRange(targetRow, 17).getDisplayValue() : "";
+  var uniqueOrderId = data.unique_order_id || data.order_uid || data.master_order_id || "";
+  if (isUpdate && !uniqueOrderId) uniqueOrderId = sheet.getRange(targetRow, 31).getValue().toString();
+  if (!uniqueOrderId) uniqueOrderId = Utilities.getUuid();
+  data.unique_order_id = uniqueOrderId;
+  var submittedBy = data.admin_name || data.submitted_by || "";
+  var submittedRole = data.admin_role || data.submitted_role || "";
+  if (isUpdate) {
+    submittedBy = sheet.getRange(targetRow, 32).getValue().toString() || submittedBy;
+    submittedRole = sheet.getRange(targetRow, 33).getValue().toString() || submittedRole;
+  }
+  data.admin_name = submittedBy;
+  data.admin_role = submittedRole;
+  if (!isUpdate) appendRawOrderLog(ss, data, sheetName, targetRow, uniqueOrderId);
 
   data.name = transliterateToLatini(data.name);
   data.place = transliterateToLatini(data.place);
@@ -606,8 +1878,10 @@ function handleOrder(data, sheetName) {
   data.note = transliterateToLatini(data.note || data.customer_note || "");
   var rawLink = (data.link || "").toString().trim();
   if (rawLink.match(/^https?:\/\//)) { data.link = rawLink; } 
-  else if (rawLink.indexOf('.') > -1 && rawLink.indexOf(' ') === -1) { data.link = "https://" + rawLink; } 
-  else { var match = rawLink.match(/(https?:\/\/[^\s]+)/); if (match) data.link = match[0]; else data.link = rawLink; }
+  else if (rawLink.indexOf('.') > -1 && rawLink.indexOf(' ') === -1) { data.link = "https://" + rawLink;
+  } 
+  else { var match = rawLink.match(/(https?:\/\/[^\s]+)/); if (match) data.link = match[0]; else data.link = rawLink;
+  }
   
   var p1 = (data.phone || '').toString().replace(/\s/g, '');
   if (p1.startsWith('+964')) p1 = '0' + p1.substring(4);
@@ -619,14 +1893,12 @@ function handleOrder(data, sheetName) {
   if (p2.startsWith('7')) p2 = '0' + p2;
   var finalPhone = p1 + (p2 ? " / " + p2 : "");
   
-  var priceInput = data['price_iqd'] || data['price (IQD)'] || data.price || "0";
-  if (typeof priceInput === 'object') { priceInput = JSON.stringify(priceInput); }
+  var priceInput = data.customer_price || data['price_iqd'] ||
+  data['price (IQD)'] || data.price || "0";
+  if (typeof priceInput === 'object') { priceInput = JSON.stringify(priceInput);
+  }
   var rawPrice = priceInput.toString().replace(/,/g, '').replace(/[^0-9.]/g, '').trim();
   var basePrice = parseFloat(rawPrice) || 0;
-  if (basePrice >= 118000) {
-    var currentExtra = (data.extra || "").toString().toLowerCase();
-    if (!currentExtra.includes("free")) { data.extra = data.extra ? (data.extra + " - Free") : "Free"; }
-  }
   
   var rawInitial = (data.initial_payment || "0").toString().replace(/,/g, '').replace(/[^0-9.]/g, '');
   var initialPayment = parseFloat(rawInitial) || 0;
@@ -651,14 +1923,27 @@ function handleOrder(data, sheetName) {
     var kurdistanCities = ["erbil", "hawler", "hewler", "sulaymaniyah", "slemani", "duhok", "kirkuk", "halabja", "zakho", "soran", "kalar", "rania", "ranya"];
     var matchedCity = kurdistanCities.find(function(c) { return placeText.includes(c); });
     var cleanPlace = placeText.replace(/[^a-z0-9]/g, "");
-    if (matchedCity && cleanPlace.length > matchedCity.length + 3) { hasShippingDetails = true; } 
-    else if (!matchedCity && cleanPlace.length > 5) { hasShippingDetails = true; }
+    if (matchedCity && cleanPlace.length > matchedCity.length + 3) { hasShippingDetails = true;
+    } 
+    else if (!matchedCity && cleanPlace.length > 5) { hasShippingDetails = true;
+    }
   }
 
-  var isFreeDelivery = (data.extra || "").toString().toLowerCase().includes("free");
-  
-  // Set the price value completely raw and unaltered in the spreadsheet
-  var sheetItemPrice = basePrice; 
+  var isNewIncomingOrder = !isUpdate;
+  var freeShippingText = ((data.extra || "") + " " + (data.note || "")).toString();
+  var isFreeDelivery = basePrice > 118000 || /free\s*shipping/i.test(freeShippingText) || /\bfree\b/i.test(data.extra || "");
+  if (isFreeDelivery) {
+    var currentExtra = (data.extra || "").toString();
+    if (!/\bfree\b/i.test(currentExtra)) data.extra = data.extra ? (data.extra + " Free") : "Free";
+  }
+
+  var postedSheetPrice = data.sheet_price !== undefined && data.sheet_price !== "" ? data.sheet_price : "";
+  var postedSheetPriceNum = postedSheetPrice !== ""
+    ? parseFloat(postedSheetPrice.toString().replace(/,/g, '').replace(/[^0-9.-]/g, ''))
+    : NaN;
+  var sheetItemPrice = isNewIncomingOrder
+    ? (isFreeDelivery ? Math.max(basePrice - actualShipping, 0) : basePrice)
+    : (!isNaN(postedSheetPriceNum) ? postedSheetPriceNum : basePrice);
   
   if (!isUpdate && !isLinkedNewOrder && hasShippingDetails) {
     var l1Cell = sheet.getRange("L1");
@@ -671,9 +1956,10 @@ function handleOrder(data, sheetName) {
   sheet.getRange(targetRow, 3).setValue(data.place || '');
   sheet.getRange(targetRow, 4).setValue(data.fib || '');
   if (data.price === '') { sheet.getRange(targetRow, 5).clearContent();
-  } else { sheet.getRange(targetRow, 5).setValue(sheetItemPrice).setNumberFormat("#,##0"); }
+  } else { sheet.getRange(targetRow, 5).setValue(sheetItemPrice).setNumberFormat("#,##0");
+  }
   
-  sheet.getRange(targetRow, 7).setValue(data.pics_text || ''); 
+  sheet.getRange(targetRow, 7).setValue(data.pics_text || '');
   sheet.getRange(targetRow, 9).setValue(finalPhone);
   if (data.box_name !== undefined) { sheet.getRange(targetRow, 10).setValue(data.box_name); }
 
@@ -690,24 +1976,22 @@ function handleOrder(data, sheetName) {
   if (!isUpdate || data.restore === "true") { 
       var now = new Date();
       var formattedDate = Utilities.formatDate(now, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss"); 
-      sheet.getRange(targetRow, 17).setValue(formattedDate); 
+      sheet.getRange(targetRow, 17).setNumberFormat("@").setValue(formattedDate); 
   }
 
   data.orderNo = (data.extra || "Pending"); 
   var finalItemPrice = basePrice;
   if (isLinkedNewOrder) {
-    var linkedString = data.linkedOrderIds.join(",");
-    sheet.getRange(targetRow, 28).setValue(linkedString);
-    for (var i = 0; i < data.linkedOrderIds.length; i++) {
-        sheet.getRange(parseInt(data.linkedOrderIds[i]), 28).setValue(linkedString);
-    }
+    relinkOrderRefs(targetRow, sheetName, data.linkedOrderIds || []);
     finalItemPrice = basePrice;
+  } else if (isUpdate && data.linkedOrderIds !== undefined) {
+    relinkOrderRefs(targetRow, sheetName, data.linkedOrderIds || []);
   }
 
   if (data.primary_urls && data.primary_urls.length > 5) {
-      sheet.getRange(targetRow, 27).setValue(data.primary_urls); // AA
+      sheet.getRange(targetRow, 27).setValue(data.primary_urls);
       var pUrls = typeof data.primary_urls === 'string' ? data.primary_urls.split(',') : data.primary_urls;
-      sheet.getRange(targetRow, 22).setFormula('=IMAGE("' + pUrls[0] + '")'); // V
+      sheet.getRange(targetRow, 22).setFormula('=IMAGE("' + pUrls[0] + '")');
   }
 
   var proofUrls = [];
@@ -720,31 +2004,114 @@ function handleOrder(data, sheetName) {
   }
 
   if (proofUrls.length > 0) {
-    sheet.getRange(targetRow, 23).setFormula('=IMAGE("' + proofUrls[0] + '")'); // W (23)
-    sheet.getRange(targetRow, 24).setValue(proofUrls.join(",")); // X (24)
+    sheet.getRange(targetRow, 23).setFormula('=IMAGE("' + proofUrls[0] + '")'); 
+    sheet.getRange(targetRow, 24).setValue(proofUrls.join(","));
   } else {
-    sheet.getRange(targetRow, 23).clearContent(); // W (23)
-    sheet.getRange(targetRow, 24).clearContent(); // X (24)
+    sheet.getRange(targetRow, 23).clearContent(); 
+    sheet.getRange(targetRow, 24).clearContent();
   }
 
   var shouldSendTelegram = (!isUpdate && !data.row_id && !data.status_color && !data.action);
   if (shouldSendTelegram) { 
       try { 
           var receiptShipping = actualShipping;
-          
           var calculatedTotal = isFreeDelivery ? basePrice : (finalItemPrice + receiptShipping);
-          var tgImage = (data.primary_urls && data.primary_urls.length > 5) ? data.primary_urls.split(',')[0] : "";
-          var txtId = sendTelegram(data, finalPhone, basePrice, calculatedTotal, tgImage, initialPayment); 
+          var tgImage = (data.primary_urls && data.primary_urls.length > 5) ?
+          data.primary_urls.split(',')[0] : "";
+          var txtId = sendTelegram(data, finalPhone, basePrice, calculatedTotal, tgImage, initialPayment);
           var pdfId = sendTelegramReceipt(data, p1, p2, basePrice, calculatedTotal, isFreeDelivery, initialPayment);
           var ids = []; if (txtId) ids.push(txtId); if (pdfId) ids.push(pdfId);
           if (ids.length > 0) { 
-            if (isLinkedNewOrder) { sheet.getRange(baseLinkedRow, 26, targetRow - baseLinkedRow + 1, 1).setValue(ids.join(","));
-            } else { sheet.getRange(targetRow, 26).setValue(ids.join(",")); }
+            var rowsForTelegramIds = isLinkedNewOrder && completeLinkedRows ? completeLinkedRows : [targetRow];
+            for (var tgRowIdx = 0; tgRowIdx < rowsForTelegramIds.length; tgRowIdx++) {
+              sheet.getRange(rowsForTelegramIds[tgRowIdx], 26).setValue(ids.join(","));
+            }
             sheet.hideColumns(26);
           } 
-      } catch (e) { console.log("Telegram Error: " + e); } 
+      } catch (e) { console.log("Telegram Error: " + e);
+      } 
   }
-  return { 'result': 'success', 'status': 'success', 'message': isUpdate ? 'Updated Row ' + targetRow : 'Created Row ' + targetRow };
+  if (isUpdate && savedDateValue) { sheet.getRange(targetRow, 17).setNumberFormat("@").setValue(savedDateValue);
+  }
+  if (data.client_request_id) {
+    sheet.getRange(targetRow, 30).setValue(data.client_request_id);
+    sheet.hideColumns(30);
+  }
+  sheet.getRange(targetRow, 31).setValue(uniqueOrderId);
+  sheet.hideColumns(31);
+  sheet.getRange(targetRow, 32).setValue(submittedBy);
+  sheet.getRange(targetRow, 33).setValue(submittedRole);
+  sheet.hideColumns(32, 2);
+  return { 'result': 'success', 'status': 'success', 'message': isUpdate ?
+  'Updated Row ' + targetRow : 'Created Row ' + targetRow, 'unique_order_id': uniqueOrderId };
+}
+
+function getLinkedGroupShipping(sheet, rowId) {
+  var place = (sheet.getRange(rowId, 3).getValue() || "").toString().toLowerCase();
+  if (!place || place === "no location" || place === "-") return 0;
+  if (place.includes("erbil") || place.includes("hawler") || place.includes("hewler")) return 3000;
+  if (place.includes("iraq") || place.includes("outside kurdistan")) return 6000;
+  return 5000;
+}
+
+function getLinkedGroupPrice(sheet, rowId) {
+  return parseFloat(String(sheet.getRange(rowId, 5).getValue()).replace(/[^0-9.-]+/g, "")) || 0;
+}
+
+function getLinkedGroupExtra(sheet, rowId) {
+  return sheet.getRange(rowId, 19).getValue().toString();
+}
+
+function getLinkedGroupNote(sheet, rowId) {
+  return sheet.getRange(rowId, 18).getValue().toString();
+}
+
+function hasLinkedGroupFreeText(sheet, rowId) {
+  return /free(?:\s|-)?(?:shipping|ship)?|\[GROUP_SHIP_DEDUCTED\]/i.test(getLinkedGroupExtra(sheet, rowId) + " " + getLinkedGroupNote(sheet, rowId));
+}
+
+function setLinkedGroupMarker(sheet, rowId) {
+  var extraRange = sheet.getRange(rowId, 19);
+  var extra = extraRange.getValue().toString();
+  if (!/\bfree\b/i.test(extra)) extra = (extra + (extra ? " " : "") + "Free").trim();
+  if (!/\[GROUP_SHIP_DEDUCTED\]/i.test(extra)) extra = (extra + (extra ? " " : "") + "[GROUP_SHIP_DEDUCTED]").trim();
+  extraRange.setValue(extra);
+}
+
+function clearLinkedGroupMarker(sheet, rowId) {
+  var extraRange = sheet.getRange(rowId, 19);
+  extraRange.setValue(extraRange.getValue().toString().replace(/\s*\[GROUP_SHIP_DEDUCTED\]/ig, "").trim());
+}
+
+function getLinkedGroupDisplayPrice(sheet, rowId) {
+  var price = getLinkedGroupPrice(sheet, rowId);
+  var shipping = getLinkedGroupShipping(sheet, rowId);
+  return (hasLinkedGroupFreeText(sheet, rowId) || price + shipping > 118000) ? price + shipping : price;
+}
+
+function applyLinkedGroupShipping(sheet, rowIds) {
+  if (!rowIds || rowIds.length === 0) return;
+  var shippingTotal = 0;
+  for (var i = 0; i < rowIds.length; i++) {
+    shippingTotal += parseFloat(String(sheet.getRange(rowIds[i], 8).getValue()).replace(/[^0-9.-]+/g, "")) || 0;
+  }
+  if (shippingTotal === 0 && rowIds.length > 1) shippingTotal = getLinkedGroupShipping(sheet, rowIds[0]);
+
+  if (rowIds.length < 2) {
+    clearLinkedGroupMarker(sheet, rowIds[0]);
+    return;
+  }
+
+  for (var r = 0; r < rowIds.length; r++) {
+    clearLinkedGroupMarker(sheet, rowIds[r]);
+    var shippingCell = sheet.getRange(rowIds[r], 8);
+    if (r === 0) {
+      if (shippingTotal) shippingCell.setValue(shippingTotal).setNumberFormat("#,##0");
+      else shippingCell.clearContent();
+    } else {
+      shippingCell.clearContent();
+    }
+  }
 }
 
 function mergeBuyingPrice(sheetName, rowIds, price, shipping) {
@@ -752,19 +2119,23 @@ function mergeBuyingPrice(sheetName, rowIds, price, shipping) {
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet) return { 'result': 'error', 'message': 'Sheet not found' };
   if (!rowIds || rowIds.length === 0) return { 'result': 'error', 'message': 'No rows selected' };
-  if (typeof rowIds === 'string') { try { rowIds = JSON.parse(rowIds); } catch(e) { return { 'result': 'error', 'message': 'Invalid row format' }; } }
+  rowIds = parseLinkedRowIds(rowIds, sheetName);
+  if (rowIds.length === 0) return { 'result': 'error', 'message': 'No valid rows selected' };
 
   rowIds.sort(function(a, b) { return a - b; });
-  var numRows = rowIds.length;
   try {
-    var linkedString = rowIds.join(",");
-    for (var i = 0; i < numRows; i++) {
-       var currentRow = rowIds[i];
-       sheet.getRange(currentRow, 28).setValue(linkedString); // AB
-       if (i === 0 && price !== undefined && price !== "") { sheet.getRange(currentRow, 6).setValue(price).setNumberFormat("#,##0"); }
+    if (rowIds.length === 1) {
+      applyLinkedGroupShipping(sheet, rowIds);
+      relinkOrderRow(sheet, rowIds[0], [], sheetName);
+      return { 'result': 'success', 'status': 'success', 'message': 'Order unlinked successfully.' };
     }
-    return { 'result': 'success', 'message': 'Logically linked ' + numRows + ' rows successfully.' };
-  } catch (e) { return { 'result': 'error', 'message': e.toString() }; }
+
+    relinkOrderRow(sheet, rowIds[0], rowIds.slice(1), sheetName);
+    applyLinkedGroupShipping(sheet, rowIds);
+    return { 'result': 'success', 'status': 'success', 'message': 'Logically linked ' + rowIds.length + ' rows successfully.'
+    };
+  } catch (e) { return { 'result': 'error', 'message': e.toString() };
+  }
 }
 
 function generateReceiptPdf(sheetName, rowId) {
@@ -774,15 +2145,16 @@ function generateReceiptPdf(sheetName, rowId) {
   
   var row = parseInt(rowId);
   var values = sheet.getRange(row, 1, 1, 28).getValues()[0]; 
-  
+  var receiptDate = sheet.getRange(row, 17).getDisplayValue() || new Date().toLocaleDateString('en-GB');
   var data = {
     insta: values[0], name: values[1], place: values[2], fib: values[3], price: values[4], pics_text: values[6], phone: values[8], 
-    extra: values[18], note: values[17], link: values[15], initial_payment: values[13], orderNo: values[11] || "Pending"
+    extra: values[18], note: values[17], link: values[15], initial_payment: values[13], orderNo: values[11] ||
+    "Pending"
   };
 
   var itemPrice = parseFloat(data.price) || 0;
 
-  var linkedIdsStr = values[27] ? values[27].toString() : ""; // AB
+  var linkedIdsStr = values[27] ? values[27].toString() : "";
   if (linkedIdsStr !== "") {
       var linkedIds = linkedIdsStr.split(',');
       var combinedPrice = 0;
@@ -806,14 +2178,18 @@ function generateReceiptPdf(sheetName, rowId) {
   } else if (isErbil) { actualShipping = 3000; receiptShipping = 3000;
   } else if (placeLower.includes('kurdistan') || placeLower.includes('outside erbil')) { actualShipping = 5000; receiptShipping = 5000;
   } else if (isOutsideKurdistan) { actualShipping = 6000; receiptShipping = 6000;
-  } else { actualShipping = 5000; receiptShipping = 5000; }
+  } else { actualShipping = 5000; receiptShipping = 5000;
+  }
 
   var shippingCostForPDF = isFree ? 0 : receiptShipping;
-  if (isFree && !isNoLocation) { itemPrice = itemPrice; } 
+  if (isFree && !isNoLocation) { itemPrice = itemPrice;
+  } 
   
   var finalTotal = (itemPrice + shippingCostForPDF) - initialPayment;
-  var shippingDisplay = isFree ? "Free" : shippingCostForPDF.toLocaleString() + " IQD";
-  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;}.sub-brand{font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #222;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${new Date().toLocaleDateString('en-GB')}</span><span>Order: ${data.orderNo}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || "-"}</span></div><div class="info-row"><span class="label">Instagram</span><span class="value">${data.insta || "-"}</span></div><div class="info-row"><span class="label">Phone</span><span class="value">${data.phone || "-"}</span></div><div class="info-row"><span class="label">Location</span><span class="value">${data.place || "-"}</span></div><div class="info-row"><span class="label">Item Price</span><span class="value">${itemPrice.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">FIB</span><span class="value">- ${initialPayment.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">Delivery</span><span class="value">${shippingDisplay}</span></div><div class="total-section"><div class="total-row"><span>Total</span><span>${finalTotal.toLocaleString()} IQD</span></div></div></body></html>`;
+  var shippingDisplay = isFree ?
+  "Free" : shippingCostForPDF.toLocaleString() + " IQD";
+  
+  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;color:#6B0F14;}.sub-brand{font-size:10px;color:#805BEA;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #6B0F14;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${receiptDate}</span><span>Order: ${data.orderNo}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || "-"}</span></div><div class="info-row"><span class="label">Instagram</span><span class="value">${data.insta || "-"}</span></div><div class="info-row"><span class="label">Phone</span><span class="value">${data.phone || "-"}</span></div><div class="info-row"><span class="label">Location</span><span class="value">${data.place || "-"}</span></div><div class="info-row"><span class="label">Item Price</span><span class="value">${itemPrice.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">FIB</span><span class="value">- ${initialPayment.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">Delivery</span><span class="value">${shippingDisplay}</span></div><div class="total-section"><div class="total-row"><span>Total</span><span>${finalTotal.toLocaleString()} IQD</span></div></div></body></html>`;
   return { 'status': 'success', 'pdfBase64': Utilities.base64Encode(Utilities.newBlob(html, "text/html", "Receipt.html").getAs("application/pdf").getBytes()) };
 }
 
@@ -837,56 +2213,46 @@ function deleteOrder(rowId, sheetName, linkedOrderIds) {
   var rId = parseInt(rowId);
   if (rId > MAX_ROW_LIMIT) return { 'result': 'error', 'message': 'Safety Lock.' };
   
-  var idsToDelete = [rId];
-  var linkedString = sheet.getRange(rId, 28).getValue().toString();
-  if (linkedString !== "") {
-     var linkedIds = linkedString.split(",");
-     for (var i = 0; i < linkedIds.length; i++) {
-        var lId = parseInt(linkedIds[i]);
-        if (!isNaN(lId) && idsToDelete.indexOf(lId) === -1) {
-           idsToDelete.push(lId);
-        }
-     }
+  var linkedRows = getCompleteLinkedRows(sheet, [rId], sheetName);
+  var incomingLinkedRows = parseLinkedRowIds(linkedOrderIds || [], sheetName);
+  for (var lr = 0; lr < incomingLinkedRows.length; lr++) {
+    if (linkedRows.indexOf(incomingLinkedRows[lr]) === -1) linkedRows.push(incomingLinkedRows[lr]);
+  }
+  if (linkedRows.indexOf(rId) === -1) linkedRows.push(rId);
+  linkedRows.sort(function(a, b) { return a - b; });
+
+  var linkedSurvivors = linkedRows.filter(function(id) { return id !== rId; });
+  var hasLinkedSurvivors = linkedSurvivors.length > 0;
+  if (hasLinkedSurvivors) {
+    clearLinkedGroup(sheet, linkedRows);
+    if (linkedSurvivors.length > 1) writeLinkedGroup(sheet, linkedSurvivors, sheetName);
   }
 
-  if (linkedOrderIds && Array.isArray(linkedOrderIds)) {
-    for (var i = 0; i < linkedOrderIds.length; i++) {
-      var frontendId = parseInt(linkedOrderIds[i]);
-      if (idsToDelete.indexOf(frontendId) === -1) {
-        idsToDelete.push(frontendId);
-      }
-    }
-  }
-  
-  idsToDelete.sort(function(a, b) { return b - a; });
-  var log = [];
-  for (var j = 0; j < idsToDelete.length; j++) {
-    var currentRowId = idsToDelete[j];
+  if (!hasLinkedSurvivors) {
     try { 
-        var idString = sheet.getRange(currentRowId, 26).getValue().toString();
-        if (idString && idString !== "") { 
-            var ids = idString.split(",");
-            for (var i = 0; i < ids.length; i++) { 
-                if (ids[i].trim() !== "") { 
-                  deleteTelegramMessage(ids[i].trim());
-                } 
-            } 
+      var idString = sheet.getRange(rId, 26).getValue().toString();
+      if (idString && idString !== "") { 
+        var ids = idString.split(",");
+        for (var i = 0; i < ids.length; i++) { 
+          if (ids[i].trim() !== "") deleteTelegramMessage(ids[i].trim());
         } 
+      } 
     } catch(e) {}
-    
-    sheet.deleteRow(currentRowId);
-    log.push(currentRowId);
   }
-  
-  return { 'result': 'success', 'status': 'success', 'message': 'Rows ' + log.join(', ') + ' deleted.' };
+
+  sheet.getRange(rId, 1, 1, 33).clearContent().setBackground(null);
+
+  return { 'result': 'success', 'status': 'success', 'message': 'Row ' + rId + ' cleared.' };
 }
 
 function sendTelegram(data, phoneString, itemPrice, totalPrice, warningImageUrl, initialPayment) {
   var botToken = "8278397957:AAFm26318RczhIE2Qg7_Qe87IYORdQW4x9E"; var chatId = "-1002539743346";
   var topicId = "8"; 
   var remaining = totalPrice - (initialPayment || 0);
-  var adminInfo = data.admin_name ? "\n\n👨‍💻 <b>Processed By:</b> " + data.admin_name : "";
-  var message = "🔔 <b>New Order Received!</b>\n\n" + "👤 <b>Name:</b> " + (data.name || "-") + "\n" + "📸 <b>Insta:</b> " + (data.insta || "-") + "\n" + "📱 <b>Phone:</b> " + phoneString + "\n" + "📍 <b>Place:</b> " + (data.place || "-") + "\n" + "📦 <b>Pics:</b> " + (data.pics_text || "1") + "\n" + "💰 <b>Item Price:</b> " + itemPrice.toLocaleString() + "\n" + "💳 <b>FIB Paid:</b> " + (initialPayment ? initialPayment.toLocaleString() : "0") + "\n" + "📉 <b>Remaining:</b> " + remaining.toLocaleString() + "\n" + "📝 <b>Extra:</b> " + (data.extra || "N/A") + "\n" + "🔗 <b>Link:</b> " + (data.link || "N/A") + "\n" + "🆔 <b>Order No:</b> " + data.orderNo + adminInfo;
+  var adminInfo = data.admin_name ?
+  "\n\n👨‍💻 <b>Processed By:</b> " + data.admin_name : "";
+  var message = "🔔 <b>New Order Received!</b>\n\n" + "👤 <b>Name:</b> " + (data.name || "-") + "\n" + "📸 <b>Insta:</b> " + (data.insta || "-") + "\n" + "📱 <b>Phone:</b> " + phoneString + "\n" + "📍 <b>Place:</b> " + (data.place || "-") + "\n" + "📦 <b>Pics:</b> " + (data.pics_text || "1") + "\n" + "💰 <b>Item Price:</b> " + itemPrice.toLocaleString() + "\n" + "💳 <b>FIB Paid:</b> " + (initialPayment ? initialPayment.toLocaleString() : "0") + "\n" + "📉 <b>Remaining:</b> " + remaining.toLocaleString() + "\n" + "📝 <b>Extra:</b> " + (data.extra || 
+  "N/A") + "\n" + "🔗 <b>Link:</b> " + (data.link || "N/A") + "\n" + "🆔 <b>Order No:</b> " + data.orderNo + adminInfo;
   var response = null; 
   if (warningImageUrl && warningImageUrl.length > 5) { 
     try { 
@@ -912,9 +2278,11 @@ function deleteTelegramMessage(msgId) {
             "muteHttpExceptions": true 
         });
         var json = JSON.parse(response.getContentText());
-        if (!json.ok) { return "Failed: " + json.description; }
+        if (!json.ok) { return "Failed: " + json.description;
+        }
         return "Success";
-    } catch(e) { return "Script Error: " + e.toString(); } 
+    } catch(e) { return "Script Error: " + e.toString();
+    } 
 }
 
 function sendTelegramReceipt(data, p1, p2, itemPrice, total, isFree, initialPayment) {
@@ -927,7 +2295,8 @@ function sendTelegramReceipt(data, p1, p2, itemPrice, total, isFree, initialPaym
   var paidAmount = initialPayment || 0; 
   
   var placeLower = (data.place || "").toLowerCase();
-  var isNoLocation = placeLower === "no location" || placeLower === "-";
+  var isNoLocation = placeLower === "no location" ||
+  placeLower === "-";
   var isErbil = placeLower.includes('erbil') || placeLower.includes('hawler') || placeLower.includes('hewler');
   var isOutsideErbil = placeLower.includes('kurdistan') || placeLower.includes('outside erbil');
   var isOutsideKurdistan = placeLower.includes('iraq') || placeLower.includes('outside kurdistan');
@@ -939,13 +2308,14 @@ function sendTelegramReceipt(data, p1, p2, itemPrice, total, isFree, initialPaym
   else receiptShipping = 5000;
   
   var shippingCostForPDF = isFree ? 0 : receiptShipping;
-  var finalCalculatedTotal = total; 
+  var finalCalculatedTotal = total;
   var finalDisplayTotal = finalCalculatedTotal - paidAmount;
   
   var shippingDisplay = isFree ? "Free" : shippingCostForPDF.toLocaleString() + " IQD";
   var qrBase64 = "";
   try { 
-    var qrDataText = "=== SHEIN IRAQI ===\n" + "Date: " + date + "\n" + "Order: " + orderId + "\n" + "------------------------\n" + "Customer: " + (data.name || "-") + "\n" + "Insta: " + (data.insta || "-") + "\n" + "Phone: " + p1 + (p2 ? " / " + p2 : "") + "\n" + "Location: " + (data.place || "-") + "\n" + "------------------------\n" + "Item Price: " + itemPrice.toLocaleString() + " IQD\n" + "FIB Paid: -" + paidAmount.toLocaleString() + " IQD\n" + "Delivery: " + shippingDisplay + "\n" + "------------------------\n" + "TOTAL: " + finalDisplayTotal.toLocaleString() + " IQD\n" + "========================";
+    var qrDataText = "=== SHEIN IRAQI ===\n" + "Date: " + date + "\n" + "Order: " + orderId + "\n" + "------------------------\n" + "Customer: " + (data.name || "-") + "\n" + "Insta: " + (data.insta || "-") + "\n" + "Phone: " + p1 + (p2 ? " / " + p2 : "") + "\n" + "Location: " + (data.place || "-") + "\n" + "------------------------\n" + "Item Price: " + itemPrice.toLocaleString() + " IQD\n" + "FIB Paid: -" + paidAmount.toLocaleString() + " IQD\n" + "Delivery: " 
+    + shippingDisplay + "\n" + "------------------------\n" + "TOTAL: " + finalDisplayTotal.toLocaleString() + " IQD\n" + "========================";
     var qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrDataText); 
     var qrBlob = UrlFetchApp.fetch(qrApiUrl).getBlob(); 
     qrBase64 = Utilities.base64Encode(qrBlob.getBytes());
@@ -953,7 +2323,7 @@ function sendTelegramReceipt(data, p1, p2, itemPrice, total, isFree, initialPaym
 
   var qrImgTag = qrBase64 ? '<img src="data:image/png;base64,' + qrBase64 + '" class="qr-img" />' : '';
   var pdfName = (data.insta || data.name || "Receipt") + ".pdf";
-  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;}.sub-brand{font-size:10px;color:#666;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #222;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${date}</span><span>Order: ${orderId}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || "-"}</span></div><div class="info-row"><span class="label">Instagram</span><span class="value">${p1 + (p2 ? "<br>" + p2 : "")}</span></div><div class="info-row"><span class="label">Location</span><span class="value">${data.place || "-"}</span></div><div class="info-row"><span class="label">Item Price</span><span class="value">${itemPrice.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">FIB</span><span class="value">- ${paidAmount.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">Delivery</span><span class="value">${shippingDisplay}</span></div><div class="total-section"><div class="total-row"><span>Total</span><span>${finalDisplayTotal.toLocaleString()} IQD</span></div><div style="text-align:right;font-size:10px;color:#666;margin-top:4px;">${noteToDisplay}</div></div><div class="footer"><div>${qrImgTag}</div><div class="contacts"><div>0751 938 8485</div><div style="margin-top:2px;font-weight:bold;">@shein_.kurdistani</div></div></div></body></html>`;
+  var html = `<html><head><meta charset="UTF-8"><style>@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');@page{size:80mm 130mm;margin:0;}body{font-family:'Roboto',sans-serif;width:80mm;height:130mm;margin:0;padding:15px;box-sizing:border-box;color:#222;}.header{text-align:center;margin-bottom:20px;}.brand-name{font-size:24px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:0;color:#6B0F14;}.sub-brand{font-size:10px;color:#805BEA;letter-spacing:2px;text-transform:uppercase;margin:0;}.meta-info{display:flex;justify-content:space-between;border-top:1px dashed #ccc;border-bottom:1px dashed #ccc;padding:8px 0;margin:15px 0;font-size:11px;color:#444;}.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;}.label{color:#777;font-weight:400;}.value{font-weight:500;text-align:right;max-width:65%;}.total-section{margin-top:15px;border-top:2px solid #6B0F14;padding-top:10px;}.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;}.footer{margin-top:25px;display:flex;align-items:center;justify-content:space-between;}.qr-img{width:60px;height:60px;}.contacts{font-size:11px;text-align:right;line-height:1.6;color:#444;}</style></head><body><div class="header"><div class="brand-name">Shein</div><div class="sub-brand">Kurdistani</div></div><div class="meta-info"><span>Date: ${date}</span><span>Order: ${orderId}</span></div><div class="info-row"><span class="label">Customer</span><span class="value">${data.name || "-"}</span></div><div class="info-row"><span class="label">Instagram</span><span class="value">${p1 + (p2 ? "<br>" + p2 : "")}</span></div><div class="info-row"><span class="label">Location</span><span class="value">${data.place || "-"}</span></div><div class="info-row"><span class="label">Item Price</span><span class="value">${itemPrice.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">FIB</span><span class="value">- ${paidAmount.toLocaleString()} IQD</span></div><div class="info-row"><span class="label">Delivery</span><span class="value">${shippingDisplay}</span></div><div class="total-section"><div class="total-row"><span>Total</span><span>${finalDisplayTotal.toLocaleString()} IQD</span></div><div style="text-align:right;font-size:10px;color:#666;margin-top:4px;">${noteToDisplay}</div></div><div class="footer"><div>${qrImgTag}</div><div class="contacts"><div>0751 938 8485</div><div style="margin-top:2px;font-weight:bold;">@shein_.kurdistani</div></div></div></body></html>`;
   var blob = Utilities.newBlob(html, "text/html", "Receipt.html"); var pdf = blob.getAs("application/pdf").setName(pdfName);
   var response = null;
   try { response = UrlFetchApp.fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/sendDocument", { "method": "post", "payload": { "chat_id": chatId, "message_thread_id": topicId, "document": pdf } });
@@ -997,7 +2367,7 @@ function deleteFromSheetMenu() {
       }
     }
     
-    sheet.deleteRow(row);
+    sheet.getRange(row, 1, 1, 33).clearContent().setBackground(null);
     ui.alert("Deletion Results:\n\n" + log.join("\n"));
   }
 }

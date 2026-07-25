@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { Scanner } from '@yudiel/react-qr-scanner';
-import { X, CameraOff, Upload } from 'lucide-react';
-import jsQR from 'jsqr';
+import React, { useState, useRef } from "react";
+import { Scanner } from "@yudiel/react-qr-scanner";
+import { X, CameraOff, Upload } from "lucide-react";
+import jsQR from "jsqr";
 
 interface QRScannerModalProps {
   onScan: (scannedText: string) => void;
@@ -25,7 +25,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
           return;
         }
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        const videoDevices = devices.filter((device) => device.kind === "videoinput");
         if (mounted) {
           if (videoDevices.length > 0) {
             setHasCamera(true);
@@ -42,10 +42,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
       }
     }
     checkCamera();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const [manualInput, setManualInput] = useState('');
+  const [manualInput, setManualInput] = useState("");
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -55,29 +57,29 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-          const tryDecode = (scale: number) => {
-            const canvas = document.createElement("canvas");
-            canvas.width = img.width * scale;
-            canvas.height = img.height * scale;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return null;
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            return jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: "attemptBoth",
-            });
-          };
+        const tryDecode = (scale: number) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return null;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          return jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth",
+          });
+        };
 
-          let code = tryDecode(1);
-          if (!code && img.width > 800) code = tryDecode(0.5);
-          if (!code && img.width > 1600) code = tryDecode(0.25);
-          if (!code) code = tryDecode(2); // Try scaling up if it's too small
+        let code = tryDecode(1);
+        if (!code && img.width > 800) code = tryDecode(0.5);
+        if (!code && img.width > 1600) code = tryDecode(0.25);
+        if (!code) code = tryDecode(2); // Try scaling up if it's too small
 
-          if (code) {
-            onScan(code.data);
-          } else {
-            setError("No QR code found in the image. Please try again or use a clearer image.");
-          }
+        if (code) {
+          onScan(code.data);
+        } else {
+          setError("No QR code found in the image. Please try again or use a clearer image.");
+        }
       };
       img.src = e.target?.result as string;
     };
@@ -89,7 +91,10 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
       <div className="w-full max-w-sm bg-card border border-border rounded-xl shadow-2xl overflow-hidden relative">
         <div className="p-4 border-b border-border flex justify-between items-center bg-secondary/50">
           <h3 className="font-semibold text-lg text-foreground">Scan Order QR</h3>
-          <button onClick={onClose} className="p-1.5 text-muted-foreground hover:bg-secondary rounded-lg transition-colors">
+          <button
+            onClick={onClose}
+            className="p-1.5 text-muted-foreground hover:bg-secondary rounded-lg transition-colors"
+          >
             <X size={18} />
           </button>
         </div>
@@ -99,13 +104,16 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
               <CameraOff size={48} className="text-red-400" />
               <p className="text-sm font-medium">{error}</p>
               <div className="flex gap-2 mt-2">
-                <button 
-                  onClick={() => { setError(null); setHasCamera(true); }}
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setHasCamera(true);
+                  }}
                   className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90"
                 >
                   Retry Camera
                 </button>
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   className="px-4 py-2 bg-secondary text-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 flex items-center gap-2"
                 >
@@ -120,20 +128,32 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
             </div>
           ) : hasCamera ? (
             <>
-              <Scanner 
+              <Scanner
                 onScan={(result) => {
                   if (result && result.length > 0) {
                     onScan(result[0].rawValue);
                   }
-                }} 
+                }}
                 onError={(err) => {
-                  const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : String(err);
-                  if (msg.includes('NotAllowedError') || msg.includes('Permission denied')) {
+                  const msg =
+                    typeof err === "string"
+                      ? err
+                      : err instanceof Error
+                        ? err.message
+                        : String(err);
+                  if (msg.includes("NotAllowedError") || msg.includes("Permission denied")) {
                     setError("Camera permission denied. Please allow camera access.");
-                  } else if (msg.includes('NotFoundError') || msg.includes('Requested device not found') || msg.includes('device not found')) {
+                  } else if (
+                    msg.includes("NotFoundError") ||
+                    msg.includes("Requested device not found") ||
+                    msg.includes("device not found")
+                  ) {
                     setError("No camera found. Please ensure your device has a camera.");
-                  } else if (msg.includes('NotReadableError') || msg.includes('Could not start video source')) {
-                     setError("Camera is in use by another application or could not be started.");
+                  } else if (
+                    msg.includes("NotReadableError") ||
+                    msg.includes("Could not start video source")
+                  ) {
+                    setError("Camera is in use by another application or could not be started.");
                   } else {
                     setError(`Camera access error: ${msg}`);
                   }
@@ -146,9 +166,9 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
         </div>
         <div className="p-4 text-center text-sm text-muted-foreground bg-secondary/30 flex flex-col gap-3">
           <span>{error ? "Scanner unavailable." : "Position the QR code within the frame"}</span>
-          
+
           {!error && (
-            <button 
+            <button
               onClick={() => fileInputRef.current?.click()}
               className="px-4 py-2 bg-secondary text-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 flex items-center justify-center gap-2 mx-auto"
             >
@@ -157,32 +177,34 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({ onScan, onClose 
           )}
 
           <div className="flex gap-2 w-full mt-2">
-            <input 
-              type="text" 
-              value={manualInput} 
-              onChange={e => setManualInput(e.target.value)}
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
               placeholder="Paste QR data or type exact ID..."
               className="flex-1 bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && manualInput.trim()) {
+                if (e.key === "Enter" && manualInput.trim()) {
                   onScan(manualInput);
                 }
               }}
             />
-            <button 
-              onClick={() => { if(manualInput.trim()) onScan(manualInput); }}
+            <button
+              onClick={() => {
+                if (manualInput.trim()) onScan(manualInput);
+              }}
               className="bg-primary text-primary-foreground px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
             >
               Scan
             </button>
           </div>
-          
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
-            ref={fileInputRef} 
-            onChange={handleImageUpload} 
+
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleImageUpload}
           />
         </div>
       </div>

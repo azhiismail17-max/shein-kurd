@@ -1,0 +1,672 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Camera,
+  CheckCircle2,
+  ExternalLink,
+  Keyboard,
+  Loader2,
+  ScanBarcode,
+  Search,
+  X,
+} from "lucide-react";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { SkuBarcodeScanner } from "./SkuBarcodeScanner";
+import { preloadSkuLabelReader } from "./skuOcrWorker";
+
+const SKU_API_URL =
+  "https://script.google.com/macros/s/AKfycbxUmtYopoO9HznjbfiAP8heZTZlk0RvxtuInPzlEuneNXs4RGAlDvY_FjUAqK8yyT8/exec";
+const skuSearchCache = new Map<string, ApiResult[]>();
+
+export interface SkuSearchOrder {
+  id: string | number;
+  sheet_name: string;
+  insta: string;
+  name?: string;
+  link?: string;
+  box_name?: string;
+  sku?: string;
+}
+
+interface FastSkuSearchProps<T extends SkuSearchOrder> {
+  orders: T[];
+  onFound: (order: T) => void;
+  getOrderBoxName: (order: T) => string;
+  boxOptions?: string[];
+  initialBoxName?: string;
+}
+
+interface ApiResult {
+  name?: string;
+  customer?: string;
+  insta?: string;
+  username?: string;
+  link?: string;
+  url?: string;
+  productLink?: string;
+  quantity?: string | number;
+  pcs?: string | number;
+  sku?: string;
+  SKU?: string;
+  code?: string;
+  product_code?: string;
+  box?: string;
+  box_name?: string;
+  boxName?: string;
+  [key: string]: unknown;
+}
+
+interface PreparedOrder<T extends SkuSearchOrder> {
+  order: T;
+  box: string;
+  searchText: string;
+  compactText: string;
+  link: string;
+  productKey: string;
+}
+
+const normalize = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+const compact = (value: unknown) => normalize(value).replace(/[^a-z0-9]+/g, "");
+const normalizeLink = (value: unknown) =>
+  normalize(value)
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/$/, "");
+const normalizeBoxName = (value: unknown) => normalize(value).replace(/^box[\s-]*/i, "");
+
+const extractIdentifiers = (value: unknown) => {
+  const text = normalize(value);
+  const separated = text.match(/[a-z]{0,4}[\s:_-]*\d(?:[\s:_-]*\d){5,}/gi) || [];
+  return [
+    ...new Set(
+      separated
+        .map((item) => item.replace(/[^a-z0-9]/gi, "").toLowerCase())
+        .filter((item) => item.length >= 6),
+    ),
+  ];
+};
+
+const getApiQueries = (value: string) => {
+  const identifiers = extractIdentifiers(value).sort((a, b) => {
+    const aIsProductSku = /^s[a-z]\d/i.test(a);
+    const bIsProductSku = /^s[a-z]\d/i.test(b);
+    if (aIsProductSku !== bIsProductSku) return aIsProductSku ? -1 : 1;
+    return b.length - a.length;
+  });
+  if (identifiers.length > 0) return identifiers.slice(0, 3);
+  return [normalize(value)].filter((query) => query.length >= 2);
+};
+
+const dedupeApiResults = (results: ApiResult[]) => {
+  const seen = new Set<string>();
+  return results.filter((result) => {
+    const key = [
+      result.link || result.url || result.productLink,
+      result.sku || result.SKU || result.code,
+      result.name || result.customer,
+    ]
+      .map(compact)
+      .join("|");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const getOrderSearchValues = (order: SkuSearchOrder) => {
+  const data = order as unknown as Record<string, unknown>;
+  return [
+    data.sku,
+    data.product_sku,
+    data.code,
+    data.product_code,
+    data.barcode,
+    data.barcode_no,
+    data.link,
+    data.name,
+    data.insta,
+    data.note,
+    data.extra,
+    data.pics_text,
+    data.trackNo,
+    data.orderNo,
+    data.unique_order_id,
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+};
+
+const scorePreparedOrder = <T extends SkuSearchOrder>(
+  prepared: PreparedOrder<T>,
+  query: string,
+) => {
+  const normalizedQuery = normalize(query);
+  if (normalizedQuery.length < 2) return 0;
+
+  const identifiers = extractIdentifiers(query);
+  let score = 0;
+
+  for (const identifier of identifiers) {
+    if (prepared.compactText.includes(identifier)) score = Math.max(score, 140);
+  }
+
+  if (prepared.searchText.includes(normalizedQuery)) score = Math.max(score, 90);
+
+  const compactQuery = compact(query);
+  if (compactQuery.length >= 4 && prepared.compactText.includes(compactQuery))
+    score = Math.max(score, 75);
+
+  const words = normalizedQuery.match(/[a-z0-9]{2,}/g) || [];
+  const matchingWords = words.filter(
+    (word) => prepared.searchText.includes(word) || prepared.compactText.includes(word),
+  );
+  if (matchingWords.length > 0) score = Math.max(score, 20 + matchingWords.length * 8);
+
+  return score;
+};
+
+const matchOrders = <T extends SkuSearchOrder>(
+  preparedOrders: PreparedOrder<T>[],
+  query: string,
+  limit = 20,
+) =>
+  preparedOrders
+    .map((prepared) => ({ prepared, score: scorePreparedOrder(prepared, query) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((item) => item.prepared.order);
+
+export function FastSkuSearch<T extends SkuSearchOrder>({
+  orders,
+  onFound,
+  getOrderBoxName,
+  boxOptions = [],
+  initialBoxName = "",
+}: FastSkuSearchProps<T>) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [skuQuery, setSkuQuery] = useState("");
+  const [selectedBox, setSelectedBox] = useState(initialBoxName);
+  const [isSearching, setIsSearching] = useState(false);
+  const [apiResults, setApiResults] = useState<ApiResult[]>([]);
+  const [lastHardwareScan, setLastHardwareScan] = useState("");
+
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestNumberRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const hardwareBufferRef = useRef("");
+  const hardwareFirstKeyRef = useRef(0);
+  const hardwareLastKeyRef = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const preparedOrders = useMemo<PreparedOrder<T>[]>(
+    () =>
+      orders.map((order) => {
+        const values = getOrderSearchValues(order);
+        const link = normalizeLink(order.link);
+        return {
+          order,
+          box: normalizeBoxName(getOrderBoxName(order) || order.box_name),
+          searchText: normalize(values.join(" ")),
+          compactText: compact(values.join(" ")),
+          link,
+          productKey: compact(link),
+        };
+      }),
+    [orders, getOrderBoxName],
+  );
+
+  const scopedOrders = useMemo(() => {
+    const wantedBox = normalizeBoxName(selectedBox);
+    return wantedBox ? preparedOrders.filter((order) => order.box === wantedBox) : preparedOrders;
+  }, [preparedOrders, selectedBox]);
+
+  const localMatches = useMemo(() => matchOrders(scopedOrders, skuQuery), [scopedOrders, skuQuery]);
+
+  const findOrdersForApiResult = (result: ApiResult) => {
+    const resultText = [
+      result.sku,
+      result.SKU,
+      result.code,
+      result.product_code,
+      result.link,
+      result.url,
+      result.productLink,
+      result.name,
+      result.customer,
+      result.insta,
+      result.username,
+      skuQuery,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const resultLink = normalizeLink(result.link || result.url || result.productLink);
+    const resultProductKey = compact(resultLink);
+    const ranked = scopedOrders.map((prepared) => {
+      let score = scorePreparedOrder(prepared, resultText);
+      if (
+        resultLink &&
+        prepared.link &&
+        (prepared.link.includes(resultLink) || resultLink.includes(prepared.link))
+      )
+        score += 160;
+      if (
+        resultProductKey &&
+        prepared.productKey &&
+        (prepared.productKey.includes(resultProductKey) ||
+          resultProductKey.includes(prepared.productKey))
+      )
+        score += 160;
+      return { prepared, score };
+    });
+
+    return ranked
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12)
+      .map((item) => item.prepared.order);
+  };
+
+  const visibleApiResults = apiResults
+    .map((result) => ({
+      result,
+      localMatches: findOrdersForApiResult(result),
+    }))
+    .filter((item) => !selectedBox || item.localMatches.length > 0);
+
+  const closeSearch = () => {
+    requestNumberRef.current += 1;
+    abortRef.current?.abort();
+    setIsScannerOpen(false);
+    setIsOpen(false);
+    setIsSearching(false);
+  };
+
+  const openSearch = () => {
+    preloadSkuLabelReader();
+    setSelectedBox(initialBoxName);
+    setSkuQuery("");
+    setApiResults([]);
+    setLastHardwareScan("");
+    hardwareBufferRef.current = "";
+    setIsScannerOpen(false);
+    setIsOpen(true);
+  };
+
+  const chooseOrder = (order: T) => {
+    closeSearch();
+    onFound(order);
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        !isScannerOpen &&
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      )
+        closeSearch();
+    };
+    if (isOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen, isScannerOpen]);
+
+  useEffect(() => {
+    if (!isOpen || isScannerOpen) return;
+
+    const handleHardwareScanner = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const now = performance.now();
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        const scannedValue = hardwareBufferRef.current.trim();
+        const scanDuration = now - hardwareFirstKeyRef.current;
+        hardwareBufferRef.current = "";
+
+        // HID scanners type a fast burst and finish with Enter or Tab. Capture it
+        // even when the search input is not focused.
+        if (scannedValue.length >= 6 && scanDuration <= 2500) {
+          event.preventDefault();
+          setLastHardwareScan(scannedValue);
+          setSkuQuery(scannedValue);
+          setApiResults([]);
+          window.requestAnimationFrame(() => inputRef.current?.focus());
+        }
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+      if (now - hardwareLastKeyRef.current > 120) {
+        hardwareBufferRef.current = "";
+        hardwareFirstKeyRef.current = now;
+      }
+      hardwareBufferRef.current += event.key;
+      hardwareLastKeyRef.current = now;
+    };
+
+    window.addEventListener("keydown", handleHardwareScanner, true);
+    return () => window.removeEventListener("keydown", handleHardwareScanner, true);
+  }, [isOpen, isScannerOpen]);
+
+  useEffect(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    abortRef.current?.abort();
+    const requestNumber = ++requestNumberRef.current;
+
+    if (!isOpen || skuQuery.trim().length < 2) {
+      setApiResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const queries = getApiQueries(skuQuery);
+    if (queries.length === 0) {
+      setApiResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setApiResults([]);
+    const hasScannedCode = queries.some((query) => query.length >= 7 && /^[a-z]*\d+$/i.test(query));
+    timeoutRef.current = setTimeout(
+      async () => {
+        const cachedResults = queries.flatMap((query) => skuSearchCache.get(query) || []);
+        const missingQueries = queries.filter((query) => !skuSearchCache.has(query));
+
+        if (missingQueries.length === 0) {
+          if (requestNumber === requestNumberRef.current)
+            setApiResults(dedupeApiResults(cachedResults));
+          return;
+        }
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const abortTimer = window.setTimeout(() => controller.abort(), 15000);
+        setIsSearching(true);
+
+        try {
+          const fetched = await Promise.all(
+            missingQueries.map(async (query) => {
+              const url = `${SKU_API_URL}?query=${encodeURIComponent(query)}`;
+              const response = await fetchWithRetry(
+                url,
+                { method: "GET", signal: controller.signal },
+                1,
+              );
+              const text = await response.text();
+              let data: { status?: string; results?: ApiResult[] } | null = null;
+              try {
+                data = JSON.parse(text);
+              } catch {
+                console.warn("Invalid SKU search response:", text.substring(0, 80));
+              }
+              const results =
+                data?.status === "success" && Array.isArray(data.results) ? data.results : [];
+              skuSearchCache.set(query, results);
+              return results;
+            }),
+          );
+
+          if (skuSearchCache.size > 100) {
+            const firstKey = skuSearchCache.keys().next().value;
+            if (firstKey) skuSearchCache.delete(firstKey);
+          }
+
+          if (requestNumber === requestNumberRef.current) {
+            setApiResults(dedupeApiResults([...cachedResults, ...fetched.flat()]));
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) console.error("SKU Search error", error);
+        } finally {
+          window.clearTimeout(abortTimer);
+          if (requestNumber === requestNumberRef.current) setIsSearching(false);
+        }
+      },
+      hasScannedCode ? 90 : 120,
+    );
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [skuQuery, isOpen]);
+
+  const handleScannedText = (value: string) => {
+    setSkuQuery(value.trim());
+    setIsScannerOpen(false);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  return (
+    <div className="relative min-w-0" ref={containerRef}>
+      <button
+        type="button"
+        onClick={openSearch}
+        className="flex w-full items-center justify-center rounded-lg border border-transparent bg-transparent p-2 text-muted-foreground transition-all hover:bg-secondary sm:w-auto"
+        title="Fast SKU Search"
+      >
+        <ScanBarcode size={16} />
+      </button>
+
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm sm:hidden"
+            onClick={closeSearch}
+          />
+          <div className="fixed left-3 right-3 top-20 z-50 max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-border bg-card p-4 shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[26rem]">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                <ScanBarcode size={18} className="text-primary" />
+                Fast SKU Search
+              </h3>
+              <button
+                type="button"
+                onClick={closeSearch}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary"
+                aria-label="Close SKU search"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {boxOptions.length > 0 && (
+              <div className="mb-3">
+                <select
+                  value={selectedBox}
+                  onChange={(event) => {
+                    setSelectedBox(event.target.value);
+                    window.requestAnimationFrame(() => inputRef.current?.focus());
+                  }}
+                  className="w-full rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground focus:border-primary/50 focus:outline-none"
+                >
+                  <option value="">All boxes</option>
+                  {boxOptions.map((box) => (
+                    <option key={box} value={box}>
+                      Box {String(box).replace(/^box[\s-]*/i, "")}
+                    </option>
+                  ))}
+                </select>
+                {selectedBox && (
+                  <p className="mt-1.5 text-[11px] font-medium text-primary">
+                    Box {selectedBox.replace(/^box[\s-]*/i, "")} stays selected while you type or
+                    scan.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="relative mb-2 flex items-center">
+              <Search
+                size={16}
+                className="pointer-events-none absolute left-3 text-muted-foreground"
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder={
+                  selectedBox
+                    ? `Search inside Box ${selectedBox.replace(/^box[\s-]*/i, "")}`
+                    : "Search SKU, link, barcode, or name…"
+                }
+                value={skuQuery}
+                onChange={(event) => setSkuQuery(event.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary py-2.5 pl-10 pr-20 text-foreground transition-colors focus:border-primary/50 focus:outline-none"
+                autoComplete="off"
+              />
+              <div className="absolute right-2 flex items-center gap-1">
+                {isSearching && <Loader2 size={15} className="animate-spin text-primary" />}
+                {skuQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSkuQuery("");
+                      setApiResults([]);
+                      inputRef.current?.focus();
+                    }}
+                    className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="rounded-md bg-primary p-1.5 text-primary-foreground hover:bg-primary/90"
+                  title="Scan product barcode with camera"
+                  aria-label="Scan product barcode with camera"
+                >
+                  <Camera size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-[10px] font-semibold text-primary">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <Keyboard size={13} className="shrink-0" />
+                <span className="truncate">Bluetooth / USB laser ready</span>
+              </span>
+              {lastHardwareScan && <span className="shrink-0">Scan received</span>}
+            </div>
+
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-0.5">
+              {localMatches.length > 0 && (
+                <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-primary">
+                    <CheckCircle2 size={14} /> Found instantly
+                  </p>
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {localMatches.map((order) => {
+                      const boxName = getOrderBoxName(order);
+                      return (
+                        <button
+                          type="button"
+                          key={`${order.sheet_name}-${order.id}`}
+                          onClick={() => chooseOrder(order)}
+                          className="min-w-0 rounded-md bg-card px-2.5 py-2 text-left text-xs font-semibold text-foreground shadow-sm ring-1 ring-border hover:bg-secondary"
+                        >
+                          <span className="block truncate">
+                            @{order.insta || order.name || "Unknown"}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-primary">
+                            {boxName ? `Box ${boxName}` : "No Box"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {visibleApiResults.map(({ result, localMatches: resultOrders }, index) => {
+                const fallbackBox = selectedBox
+                  ? ""
+                  : result.box || result.box_name || result.boxName || "";
+                return (
+                  <div
+                    key={`${compact(result.link || result.sku || result.name)}-${index}`}
+                    className="space-y-3 rounded-lg border border-border bg-secondary/50 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-semibold">
+                          {result.name || result.customer || "Unknown Customer"}
+                        </h4>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {result.quantity || result.pcs || 0} pieces
+                        </p>
+                        {resultOrders.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {resultOrders.slice(0, 8).map((order) => {
+                              const boxName = getOrderBoxName(order);
+                              return (
+                                <button
+                                  type="button"
+                                  key={`${order.sheet_name}-${order.id}`}
+                                  onClick={() => chooseOrder(order)}
+                                  className="inline-flex items-center rounded bg-primary/10 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/20"
+                                >
+                                  {boxName ? `Box ${boxName}` : "No Box"} - @
+                                  {order.insta || order.name || "Unknown"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : fallbackBox ? (
+                          <p className="mt-1 inline-flex rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                            Box {String(fallbackBox).replace(/^box[\s-]*/i, "")}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className="shrink-0 rounded bg-green-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-green-600">
+                        Match
+                      </span>
+                    </div>
+
+                    {result.link && (
+                      <a
+                        href={result.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+                      >
+                        <ExternalLink size={14} /> View Product
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+
+              {skuQuery.trim() &&
+                localMatches.length === 0 &&
+                visibleApiResults.length === 0 &&
+                !isSearching && (
+                  <div className="px-2 py-7 text-center text-sm text-muted-foreground">
+                    No matching SKU, barcode, or link found.
+                  </div>
+                )}
+
+              {!skuQuery.trim() && (
+                <div className="px-2 py-7 text-center text-sm text-muted-foreground opacity-75">
+                  Type a SKU or tap the camera to scan the whole product label.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {isScannerOpen && (
+            <SkuBarcodeScanner onScan={handleScannedText} onClose={() => setIsScannerOpen(false)} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}

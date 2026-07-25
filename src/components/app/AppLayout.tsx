@@ -1,15 +1,31 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from "react";
 import {
-  LayoutDashboard, Users, ShoppingCart, Package, Truck, Search,
-  Menu, X, Calculator, ChevronLeft, Camera, LogOut, Bell, MessageCircle, Plus, Wallet
-} from 'lucide-react';
-import { YEARS_CONFIG } from '@/types';
+  LayoutDashboard,
+  Users,
+  ShoppingCart,
+  Package,
+  Truck,
+  Search,
+  Menu,
+  X,
+  Calculator,
+  ChevronLeft,
+  Camera,
+  LogOut,
+  Bell,
+  MessageCircle,
+  Plus,
+  Wallet,
+  CreditCard,
+} from "lucide-react";
+import { YEARS_CONFIG } from "@/types";
 
-import NotificationsDropdown from './NotificationsDropdown';
-import { SystemKey, SystemSwitcher } from './SystemSwitcher';
-import ThemeColorPicker from './ThemeColorPicker';
-import { recordPresence } from '@/lib/teamActivity';
-import { GlobalCalculatorButton } from '@/components/GlobalCalculator';
+import NotificationsDropdown from "./NotificationsDropdown";
+import PushNotificationOnboarding from "./PushNotificationOnboarding";
+import { SystemKey, SystemSwitcher } from "./SystemSwitcher";
+import ThemeColorPicker from "./ThemeColorPicker";
+import { recordPresence } from "@/lib/teamActivity";
+import { GlobalCalculatorButton } from "@/components/GlobalCalculator";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -25,6 +41,9 @@ interface AppLayoutProps {
   activeYear?: string;
   setActiveYear?: (y: string) => void;
   availableMonths?: string[];
+  monthlyStats?: Record<string, { count?: number }>;
+  activeMonth?: string;
+  onSetActiveMonth?: (month: string) => void;
   role: string;
   onLogout: () => void;
   onNotificationClick?: (orderId: string, sheetName: string) => void;
@@ -33,78 +52,107 @@ interface AppLayoutProps {
 }
 
 const ALL_MENU_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'orders', label: 'Orders', icon: ShoppingCart },
-  { id: 'messages', label: 'Messages', icon: MessageCircle },
-  { id: 'calculator', label: 'Calculator', icon: Calculator },
-  { id: 'expenses', label: 'Masrufat', icon: Wallet },
-  { id: 'batches', label: 'Boxes', icon: Package },
-  { id: 'new-order', label: 'New Order', icon: Plus },
-  { id: 'delivery', label: 'Delivery', icon: Truck },
-  { id: 'team', label: 'Team', icon: Users },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "orders", label: "Orders", icon: ShoppingCart },
+  { id: "messages", label: "Messages", icon: MessageCircle },
+  { id: "calculator", label: "Calculator", icon: Calculator },
+  { id: "expenses", label: "Masrufat", icon: Wallet },
+  { id: "gift-cards", label: "Gift Cards", icon: CreditCard },
+  { id: "batches", label: "Boxes", icon: Package },
+  { id: "new-order", label: "New Order", icon: Plus },
+  { id: "delivery", label: "Delivery", icon: Truck },
+  { id: "team", label: "Team", icon: Users },
 ];
 
 const AppLayout: React.FC<AppLayoutProps> = ({
-  children, activeTab, setActiveTab, searchQuery = '', setSearchQuery, isSearchingAll, onSearchAll, onCameraSearch,
-  viewingMonth, setViewingMonth, activeYear, setActiveYear, availableMonths = [], role, onLogout, onNotificationClick,
-  currentSystem = 'kurdistani', onSystemChange
+  children,
+  activeTab,
+  setActiveTab,
+  searchQuery = "",
+  setSearchQuery,
+  isSearchingAll,
+  onSearchAll,
+  onCameraSearch,
+  viewingMonth,
+  setViewingMonth,
+  activeYear,
+  setActiveYear,
+  availableMonths = [],
+  monthlyStats = {},
+  role,
+  onLogout,
+  onNotificationClick,
+  activeMonth,
+  onSetActiveMonth,
+  currentSystem = "kurdistani",
+  onSystemChange,
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchExpanded, setSearchExpanded] = useState(false);
-  
+
   const [localSearch, setLocalSearch] = useState(searchQuery);
 
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const trimmedSearch = localSearch.trim();
+  const searchDigits = trimmedSearch.replace(/\D/g, "");
+  const canSearchOrderNumber = /^\d+$/.test(trimmedSearch);
 
   useEffect(() => {
     try {
-      const lastReadMap = JSON.parse(localStorage.getItem('messages_last_read') || '{}');
+      const lastReadMap = JSON.parse(localStorage.getItem("messages_last_read") || "{}");
       const allLastReads = Object.values(lastReadMap) as number[];
       // Minimal fetch to check topics if any topic.lastMessageAt > lastRead[topic.id]
       // Because we don't have direct access to db here easily without importing it, let's just import fb:
       let isMounted = true;
-      import('@/lib/firebase').then(({ db }) => {
-        import('firebase/firestore').then(({ collection, query, onSnapshot }) => {
-          const q = query(collection(db, 'topics'));
+      import("@/lib/firebase").then(({ db }) => {
+        import("firebase/firestore").then(({ collection, query, onSnapshot }) => {
+          const q = query(collection(db, "topics"));
           const unsubscribe = onSnapshot(q, (snapshot) => {
             if (!isMounted) return;
             let unread = false;
-            const updatedLastReads = JSON.parse(localStorage.getItem('messages_last_read') || '{}');
-            snapshot.docs.forEach(doc => {
+            const updatedLastReads = JSON.parse(localStorage.getItem("messages_last_read") || "{}");
+            snapshot.docs.forEach((doc) => {
               const data = doc.data();
-              if (data.lastMessageAt && data.lastMessageAt.toMillis && data.lastMessageAt.toMillis() > (updatedLastReads[doc.id] || 0)) {
-                
+              if (
+                data.lastMessageAt &&
+                data.lastMessageAt.toMillis &&
+                data.lastMessageAt.toMillis() > (updatedLastReads[doc.id] || 0)
+              ) {
                 // if it's a DM, make sure it belongs to us
-                if (doc.id.startsWith('dm_')) {
-                   const currentUser = localStorage.getItem('auth_username') || role;
-                   if (!doc.id.includes(currentUser.toLowerCase())) return;
+                if (doc.id.startsWith("dm_")) {
+                  const currentUser = localStorage.getItem("auth_username") || role;
+                  if (!doc.id.includes(currentUser.toLowerCase())) return;
                 }
-                
+
                 unread = true;
               }
             });
-            setHasUnreadMessages(unread && activeTab !== 'messages');
+            setHasUnreadMessages(unread && activeTab !== "messages");
           });
           return () => unsubscribe();
         });
       });
-      return () => { isMounted = false; };
-    } catch { /* ignore */ }
+      return () => {
+        isMounted = false;
+      };
+    } catch {
+      /* ignore */
+    }
   }, [activeTab, role]);
 
   useEffect(() => {
-    let interval: any;
-    const currentUser = localStorage.getItem('auth_username') || role;
-    const pingPresence = () => recordPresence('kurdistani', currentUser, role, true).catch(() => {});
-    const setOffline = () => recordPresence('kurdistani', currentUser, role, false).catch(() => {});
+    const currentUser = localStorage.getItem("auth_username") || role;
+    const pingPresence = () =>
+      recordPresence("kurdistani", currentUser, role, true).catch(() => {});
+    const setOffline = () => recordPresence("kurdistani", currentUser, role, false).catch(() => {});
 
     pingPresence();
-    interval = setInterval(pingPresence, 30000);
-    window.addEventListener('beforeunload', setOffline);
-    
-    return () => { 
+    const interval = setInterval(pingPresence, 30000);
+    window.addEventListener("beforeunload", setOffline);
+
+    return () => {
       if (interval) clearInterval(interval);
-      window.removeEventListener('beforeunload', setOffline);
+      window.removeEventListener("beforeunload", setOffline);
       setOffline();
     };
   }, [role]);
@@ -113,82 +161,132 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     setLocalSearch(searchQuery);
   }, [searchQuery]);
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (setSearchQuery && localSearch !== searchQuery) {
-        setSearchQuery(localSearch);
-      }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [localSearch, setSearchQuery, searchQuery]);
+  const showBack = activeTab === "new-order";
+  const isAdmin = role === "admin";
+  const activeMonthOptions =
+    activeYear && YEARS_CONFIG[activeYear] ? YEARS_CONFIG[activeYear] : availableMonths;
 
-  const showBack = activeTab === 'new-order';
-
-  const menuItems = ALL_MENU_ITEMS.filter(item => {
-    if (role === 'owner') return true;
-    if (role === 'admin') {
-      return item.id !== 'dashboard';
+  const menuItems = ALL_MENU_ITEMS.filter((item) => {
+    if (role === "owner") return true;
+    if (role === "admin") {
+      return item.id !== "dashboard";
     }
-    if (role === 'moderator') {
-      return item.id === 'calculator' || item.id === 'orders' || item.id === 'new-order' || item.id === 'messages' || item.id === 'team';
+    if (role === "moderator") {
+      return (
+        item.id === "calculator" ||
+        item.id === "orders" ||
+        item.id === "batches" ||
+        item.id === "new-order" ||
+        item.id === "messages" ||
+        item.id === "team"
+      );
     }
-    if (role === 'delivery') {
-      return item.id === 'calculator' || item.id === 'delivery' || item.id === 'messages' || item.id === 'team';
+    if (role === "delivery") {
+      return (
+        item.id === "calculator" ||
+        item.id === "delivery" ||
+        item.id === "messages" ||
+        item.id === "team"
+      );
     }
-    return item.id === 'calculator';
+    return item.id === "calculator";
   });
+  const mobileTabIds = ["dashboard", "calculator", "expenses", "gift-cards", "team"];
+  const mobileMenuItems = mobileTabIds
+    .map((id) => menuItems.find((item) => item.id === id))
+    .filter((item): item is (typeof menuItems)[number] => Boolean(item));
 
   return (
-    <div className="h-[100dvh] w-full bg-background text-foreground font-sans flex overflow-hidden transition-colors duration-300">
+    <div className="h-[100dvh] w-full professional-surface text-foreground font-sans flex overflow-hidden transition-colors duration-300">
+      <PushNotificationOnboarding role={role} system="kurdistani" />
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-foreground/20 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 bg-slate-950/45 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
-      <aside className={`fixed lg:static inset-y-0 left-0 z-50 w-[82vw] max-w-72 lg:w-64 bg-card border-r border-border transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="h-full flex flex-col">
-          <div className="p-5 flex items-center justify-between border-b border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center glow-primary">
-                <span className="font-bold text-primary-foreground text-sm">S</span>
+      <aside
+        className={`fixed lg:static inset-y-0 ${isAdmin ? "right-0 border-l" : "left-0 border-r"} z-50 w-[86vw] max-w-80 lg:w-72 bg-sidebar text-sidebar-foreground border-sidebar-border transform transition-transform duration-300 shadow-2xl shadow-slate-950/25 lg:shadow-none ${sidebarOpen ? "translate-x-0" : isAdmin ? "translate-x-full lg:translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+      >
+        <div className="h-full flex flex-col bg-[radial-gradient(circle_at_top,hsl(var(--sidebar-primary)/0.22),transparent_24rem)]">
+          <div className="flex items-center justify-between gap-2 border-b border-sidebar-border/80 p-4 sm:p-5">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="h-11 w-11 shrink-0 overflow-hidden rounded-2xl bg-sidebar-primary shadow-lg shadow-black/25 ring-1 ring-white/10 sm:h-12 sm:w-12">
+                <img
+                  src="/logo-1080.png"
+                  alt="Shein Kurdistani"
+                  className="h-full w-full object-cover"
+                />
               </div>
-              <div>
-                <h1 className="font-bold text-base tracking-tight">Shein <span className="text-primary">Kurd</span></h1>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-semibold">{role} Hub</p>
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                  <h1 className="min-w-0 truncate whitespace-nowrap text-base font-extrabold tracking-tight text-white sm:text-lg">
+                    Shein Kurd
+                  </h1>
+                  {role === "owner" && (
+                    <SystemSwitcher
+                      role={role}
+                      current={currentSystem}
+                      onChange={onSystemChange}
+                      variant="brand"
+                    />
+                  )}
+                </div>
+                <p className="text-[10px] text-sidebar-foreground uppercase tracking-[0.16em] font-semibold">
+                  {role} Hub
+                </p>
               </div>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-muted-foreground hover:text-foreground transition-colors">
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="relative z-20 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground transition-colors hover:bg-white/10 hover:text-white lg:hidden"
+            >
               <X size={20} />
             </button>
           </div>
 
-          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-            {menuItems.map(item => {
+          <nav className="flex-1 px-3 py-5 space-y-2 overflow-y-auto custom-scrollbar">
+            {menuItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium
-                    ${active
-                      ? 'bg-primary/10 text-primary border border-primary/20'
-                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground border border-transparent'
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    setSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3.5 rounded-2xl transition-all text-sm font-semibold ${isAdmin ? "flex-row-reverse text-right" : ""}
+                    ${
+                      active
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-lg shadow-black/18 ring-1 ring-white/10"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent/90 hover:text-sidebar-accent-foreground border border-white/0 hover:border-white/5"
                     }`}
                 >
                   <Icon size={18} />
                   <span>{item.label}</span>
-                  {item.id === 'messages' && hasUnreadMessages && (
-                    <div className="ml-2 w-2 h-2 rounded-full bg-red-500 glow-red animate-pulse" />
+                  {item.id === "messages" && hasUnreadMessages && (
+                    <div
+                      className={`${isAdmin ? "mr-2" : "ml-2"} w-2 h-2 rounded-full bg-red-500 glow-red animate-pulse`}
+                    />
                   )}
-                  {active && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary glow-primary" />}
+                  {active && (
+                    <div
+                      className={`${isAdmin ? "mr-auto" : "ml-auto"} w-1.5 h-5 rounded-full bg-sidebar-primary-foreground/80`}
+                    />
+                  )}
                 </button>
               );
             })}
           </nav>
 
-          <div className="p-4 border-t border-border space-y-3">
+          <div className="p-4 border-t border-sidebar-border/80 space-y-3">
             <ThemeColorPicker />
-            <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-all font-medium">
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center gap-3 px-3.5 py-3.5 rounded-2xl text-sm text-red-200 hover:bg-red-500/15 hover:text-white transition-all font-semibold"
+            >
               <LogOut size={18} />
               <span>Sign Out</span>
             </button>
@@ -197,38 +295,75 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="bg-card/80 backdrop-blur-xl border-b border-border sticky top-0 z-30 shrink-0">
-          <div className="px-2 sm:px-4 py-1.5 sm:py-3 flex items-center justify-between gap-1.5 sm:gap-3">
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={() => setSidebarOpen(true)} className="lg:hidden relative p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary transition-colors">
+        <header className="glass-surface sticky top-0 z-30 shrink-0 shadow-sm">
+          <div
+            className={`px-3 sm:px-5 lg:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 sm:gap-4 ${isAdmin ? "flex-row-reverse" : ""}`}
+          >
+            <div className="relative z-20 flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-card text-muted-foreground shadow-sm transition-colors hover:bg-secondary hover:text-foreground lg:hidden"
+              >
                 <Menu size={20} />
-                {hasUnreadMessages && <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 glow-red ring-2 ring-card" />}
+                {hasUnreadMessages && (
+                  <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500 glow-red ring-2 ring-card" />
+                )}
               </button>
               {showBack ? (
-                <button onClick={() => setActiveTab('orders')} className="hidden md:flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+                <button
+                  onClick={() => setActiveTab("orders")}
+                  className="hidden md:flex items-center gap-1 rounded-xl p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                >
                   <ChevronLeft size={20} />
                 </button>
               ) : (
-                <h2 className="hidden md:block text-lg font-bold capitalize whitespace-nowrap">{activeTab === 'new-order' ? 'New Order' : activeTab}</h2>
+                <h2 className="hidden md:block text-lg font-extrabold capitalize whitespace-nowrap tracking-tight">
+                  {activeTab === "new-order" ? "New Order" : activeTab}
+                </h2>
               )}
             </div>
 
             <div className="flex-1 min-w-0 w-full max-w-none sm:max-w-2xl">
               <div className="relative w-full group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" size={16} />
+                <Search
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors"
+                  size={16}
+                />
                 <input
                   type="text"
                   placeholder="Search..."
                   value={localSearch}
-                  onChange={e => {
-                    setLocalSearch(e.target.value);
-                    if (e.target.value && activeTab !== 'orders') setActiveTab('orders');
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setLocalSearch(next);
+                    setSearchQuery?.(next);
+                    if (next && activeTab !== "orders") setActiveTab("orders");
                   }}
-                  className="w-full bg-secondary border border-border text-foreground text-base sm:text-sm rounded-lg pl-9 pr-8 py-1.5 sm:py-2 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground"
+                  className="w-full bg-card border border-border text-foreground text-base sm:text-sm rounded-2xl pl-10 pr-10 py-3 shadow-sm focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground"
                 />
                 {localSearch && (
-                  <button onClick={() => { setLocalSearch(''); setSearchQuery?.(''); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground">
+                  <button
+                    onClick={() => {
+                      setLocalSearch("");
+                      setSearchQuery?.("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  >
                     <X size={14} />
+                  </button>
+                )}
+                {canSearchOrderNumber && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = `order:${searchDigits}`;
+                      setLocalSearch(next);
+                      setSearchQuery?.(next);
+                      if (activeTab !== "orders") setActiveTab("orders");
+                    }}
+                    className="absolute left-0 top-full mt-2 rounded-lg border border-primary/20 bg-card px-3 py-1.5 text-[11px] font-semibold text-primary shadow-lg hover:bg-primary/10"
+                  >
+                    Order number {searchDigits}
                   </button>
                 )}
               </div>
@@ -242,18 +377,55 @@ const AppLayout: React.FC<AppLayoutProps> = ({
                 </div>
               )}
               <NotificationsDropdown role={role} onNotificationClick={onNotificationClick} />
-              {role === 'owner' && <SystemSwitcher role={role} current={currentSystem} onChange={onSystemChange} />}
-              <button onClick={onCameraSearch} className="p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors" title="Image Search">
+              <button
+                onClick={onCameraSearch}
+                className="p-3 text-muted-foreground hover:text-primary hover:bg-secondary rounded-2xl transition-colors"
+                title="Image Search"
+              >
                 <Camera size={18} />
               </button>
-              {role === 'owner' && <GlobalCalculatorButton variant="inline" />}
+              {role === "owner" && (
+                <GlobalCalculatorButton
+                  variant="inline"
+                  monthlyStats={monthlyStats}
+                  monthOptions={activeMonthOptions}
+                  yearLabel={activeYear}
+                />
+              )}
             </div>
           </div>
         </header>
 
-        <main className={`flex-1 min-h-0 ${activeTab === 'messages' ? 'overflow-hidden p-0' : 'overflow-y-auto p-2 sm:p-4 lg:p-6 custom-scrollbar'}`}>
+        <main
+          className={`flex-1 min-h-0 ${activeTab === "messages" ? "overflow-hidden p-0 pb-24 lg:pb-0" : "overflow-y-auto px-4 pt-4 pb-28 sm:p-5 lg:p-7 custom-scrollbar"}`}
+        >
           {children}
         </main>
+
+        <nav className="mobile-tabbar lg:hidden" aria-label="Main navigation">
+          {mobileMenuItems.map((item) => {
+            const Icon = item.icon;
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={active ? "is-active" : ""}
+              >
+                <span className="mobile-tabbar-icon">
+                  <Icon size={16} strokeWidth={active ? 2.4 : 2} />
+                </span>
+                <span>
+                  {item.id === "gift-cards"
+                    ? "Gift Card"
+                    : item.id === "expenses"
+                      ? "Masrufat"
+                      : item.label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

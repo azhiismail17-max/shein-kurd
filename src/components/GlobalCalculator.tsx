@@ -1,19 +1,34 @@
-import React, { useState } from 'react';
-import { Calculator } from 'lucide-react';
+import React, { useState } from "react";
+import { Calculator } from "lucide-react";
 
-const GlobalCalculatorPanel = React.lazy(() => import('@/components/GlobalCalculatorPanel'));
+const GlobalCalculatorPanel = React.lazy(() => import("@/components/GlobalCalculatorPanel"));
 
-export function GlobalCalculatorButton({ variant = 'floating' }: { variant?: 'floating' | 'inline' }) {
+type MonthlyCount = {
+  count?: number;
+};
+
+export function GlobalCalculatorButton({
+  variant = "floating",
+  monthlyStats = {},
+  monthOptions = [],
+  yearLabel,
+}: {
+  variant?: "floating" | "inline";
+  monthlyStats?: Record<string, MonthlyCount>;
+  monthOptions?: string[];
+  yearLabel?: string;
+}) {
   const [isOpen, setIsOpen] = useState(false);
-  const isFloating = variant === 'floating';
+  const isFloating = variant === "floating";
 
   return (
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className={isFloating
-          ? "fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary to-primary/80 rounded-full shadow-lg flex items-center justify-center text-primary-foreground hover:shadow-xl hover:scale-105 active:scale-95 transition-all"
-          : "p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors"
+        className={
+          isFloating
+            ? "fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-br from-primary to-primary/80 rounded-full shadow-lg flex items-center justify-center text-primary-foreground hover:shadow-xl hover:scale-105 active:scale-95 transition-all"
+            : "p-1.5 sm:p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors"
         }
         title="Global Calculator"
       >
@@ -22,7 +37,12 @@ export function GlobalCalculatorButton({ variant = 'floating' }: { variant?: 'fl
 
       {isOpen && (
         <React.Suspense fallback={null}>
-          <GlobalCalculatorPanel onClose={() => setIsOpen(false)} />
+          <GlobalCalculatorPanel
+            onClose={() => setIsOpen(false)}
+            monthlyStats={monthlyStats}
+            monthOptions={monthOptions}
+            yearLabel={yearLabel}
+          />
         </React.Suspense>
       )}
     </>
