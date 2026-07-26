@@ -18,6 +18,17 @@ const SUPABASE_URL = "https://nbzgmrltykhadwyyesvd.supabase.co/rest/v1/orders";
 // Publishable (anon) key - intended for client use; access governed by RLS.
 const SUPABASE_KEY = "sb_publishable_wVJFTAiKIufi0Rv6GnpjPg_A9QReZ52";
 
+// A short code still finds the product, because searching the downloaded index
+// costs nothing - it is a scan of a few hundred strings in memory. Going out to
+// the network for four digits is a different matter: it would match a great many
+// rows and would fire on the way to typing a full code, so remote lookups still
+// wait for the complete six or seven digits.
+const MIN_LOCAL_DIGITS = 4;
+const MIN_REMOTE_DIGITS = 6;
+// A four digit code can appear in a lot of stored codes; enough are shown to be
+// useful without turning the result list into a wall.
+const MAX_INDEX_HITS = 25;
+
 const INDEX_KEY = "sku_index_v1";
 const ANSWERS_KEY = "sku_answers_v1";
 const INDEX_MAX_ROWS = 5000;
@@ -137,20 +148,30 @@ export function primeSkuIndex(force = false): Promise<void> {
  */
 export function lookupSkuInIndex(code: string): SkuLookupResult[] | null {
   const pin = toPinCode(code);
-  if (pin.length < 6) return null;
+  if (pin.length < MIN_LOCAL_DIGITS) return null;
   ensureIndexLoaded();
   if (!indexRows || indexRows.length === 0) return null;
 
   const hits = indexRows.filter((row) => row.sku.includes(pin));
-  return hits.length > 0
-    ? hits.map((row) => ({
-        name: row.name,
-        link: row.link,
-        quantity: row.pcs,
-        pcs: row.pcs,
-        sku: row.sku,
-      }))
-    : null;
+  if (hits.length === 0) return null;
+
+  // A stored code that *ends* with what was typed is the real match - the codes
+  // are identified by their tail. A code that merely contains those digits
+  // somewhere in the middle is a coincidence, so it is shown after.
+  const isTailMatch = (row: IndexRow) =>
+    row.sku.split(/[^\d]+/).some((part) => part.length > 0 && part.endsWith(pin));
+
+  return hits
+    .map((row) => ({ row, rank: isTailMatch(row) ? 0 : 1 }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, MAX_INDEX_HITS)
+    .map(({ row }) => ({
+      name: row.name,
+      link: row.link,
+      quantity: row.pcs,
+      pcs: row.pcs,
+      sku: row.sku,
+    }));
 }
 
 export function getSkuIndexInfo() {
@@ -220,13 +241,17 @@ export async function lookupSku(
   signal?: AbortSignal,
 ): Promise<{ results: SkuLookupResult[]; source: SkuLookupSource }> {
   const pin = toPinCode(code);
-  if (pin.length < 6) return { results: [], source: "none" };
+  if (pin.length < MIN_LOCAL_DIGITS) return { results: [], source: "none" };
 
   const fromIndex = lookupSkuInIndex(pin);
   if (fromIndex) return { results: fromIndex, source: "index" };
 
   const saved = readAnswers()[pin];
   if (Array.isArray(saved) && saved.length > 0) return { results: saved, source: "saved" };
+
+  // Short codes are answered from the index alone. Asking the server for four
+  // digits would fire on the way to a full code and return half the table.
+  if (pin.length < MIN_REMOTE_DIGITS) return { results: [], source: "none" };
 
   let results: SkuLookupResult[] = [];
   let source: SkuLookupSource = "none";

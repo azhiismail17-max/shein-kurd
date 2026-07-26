@@ -23,7 +23,10 @@ import { SkuNumberScanner } from "./SkuNumberScanner";
 import { preloadSkuLabelReader } from "./skuOcrWorker";
 
 // Codes are stored as a 6-7 digit tail, so the field behaves like a PIN pad.
-const PIN_MIN_DIGITS = 6;
+// Searching starts at four digits because the downloaded index answers that
+// for free; a full six or seven is what narrows it to one product.
+const PIN_MIN_DIGITS = 4;
+const PIN_FULL_DIGITS = 6;
 const PIN_MAX_DIGITS = 7;
 const skuSearchCache = new Map<string, ApiResult[]>();
 
@@ -325,11 +328,10 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
     abortRef.current?.abort();
     const requestNumber = ++requestNumberRef.current;
 
-    // The code is a 6-7 digit PIN, so there is nothing worth asking about until
-    // all of it is there. Searching from the second character used to fire a
-    // separate request for every keystroke - five slow lookups to type one
-    // code - and only the last one could ever be the right answer.
-    if (!isOpen || skuQuery.length < 6) {
+    // Nothing to look up until there are at least a few digits. Four is enough
+    // for the local index; the lookup itself only goes to the network once the
+    // full code is there, so typing towards it costs no requests.
+    if (!isOpen || skuQuery.length < PIN_MIN_DIGITS) {
       setApiResults([]);
       setIsSearching(false);
       return;
@@ -509,7 +511,7 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
                 {lastHardwareScan
                   ? "Scan received"
                   : skuQuery.length === 0
-                    ? `${PIN_MIN_DIGITS}-${PIN_MAX_DIGITS} digits`
+                    ? `${PIN_FULL_DIGITS}-${PIN_MAX_DIGITS} digits`
                     : skuQuery.length < PIN_MIN_DIGITS
                       ? `${PIN_MIN_DIGITS - skuQuery.length} more digit${
                           PIN_MIN_DIGITS - skuQuery.length === 1 ? "" : "s"
@@ -622,14 +624,14 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
 
               {skuQuery.length > 0 && skuQuery.length < PIN_MIN_DIGITS && (
                 <div className="px-2 py-7 text-center text-sm text-muted-foreground opacity-75">
-                  Keep typing - a product code is {PIN_MIN_DIGITS} or {PIN_MAX_DIGITS} digits.
+                  Keep typing - searching starts at {PIN_MIN_DIGITS} digits.
                 </div>
               )}
 
               {skuQuery.length === 0 && (
                 <div className="px-2 py-7 text-center text-sm text-muted-foreground opacity-75">
-                  Type the {PIN_MIN_DIGITS}-{PIN_MAX_DIGITS} digit code, scan with the laser, or tap
-                  the camera.
+                  Type the {PIN_FULL_DIGITS}-{PIN_MAX_DIGITS} digit code, scan with the laser, or
+                  tap the camera.
                 </div>
               )}
             </div>
