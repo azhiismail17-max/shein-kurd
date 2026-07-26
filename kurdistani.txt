@@ -807,7 +807,22 @@ function setStatusTag(extraText, statusKey) {
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+  var hasLock = lock.tryLock(10000);
+  if (!hasLock) {
+    // Without this check, a save that arrives while another save is still in
+    // progress used to run completely unlocked - two writes could both read
+    // the same old "spent"/"remaining" value and each save their own update,
+    // silently discarding whichever one wrote second. Returning a clear,
+    // retryable error instead means the client's own retry logic gets a
+    // chance to run again once the lock is free, rather than a save quietly
+    // never actually landing.
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      result: "error",
+      message: "Server is busy, please try again.",
+      retryable: true
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
   try {
     var data = {};
     if (e && e.postData && e.postData.contents) {

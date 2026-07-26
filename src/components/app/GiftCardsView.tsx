@@ -123,6 +123,33 @@ const giftCardValuesMatch = (a: GiftCard, b: GiftCard) =>
   JSON.stringify([...(a.linked_boxes || [])].sort()) ===
     JSON.stringify([...(b.linked_boxes || [])].sort());
 
+// A brand-new card is saved locally under a temporary "local-<timestamp>" id
+// before the server has assigned it a real row id. If the user spends from
+// it, links it to a box, etc. before the next refresh swaps in the server's
+// copy, that action would send this temporary id - which the sheet has never
+// heard of - and silently fail to find the row. Swapping the id in immediately
+// once the save response confirms the real one closes that window, instead of
+// waiting on the next refresh cycle to happen to catch it.
+const reconcileGiftCardId = (oldId: string, newId: string) => {
+  if (!oldId || !newId || oldId === newId) return;
+  const cards = readLocalGiftCards();
+  localStorage.setItem(
+    LOCAL_GIFT_CARDS_KEY,
+    JSON.stringify(cards.map((card) => (card.id === oldId ? { ...card, id: newId } : card))),
+  );
+  const prices = readBoxPrices();
+  const prefix = `${oldId}|`;
+  let pricesChanged = false;
+  for (const key of Object.keys(prices)) {
+    if (key.startsWith(prefix)) {
+      prices[`${newId}|${key.slice(prefix.length)}`] = prices[key];
+      delete prices[key];
+      pricesChanged = true;
+    }
+  }
+  if (pricesChanged) localStorage.setItem(LOCAL_GIFT_CARD_BOX_PRICES_KEY, JSON.stringify(prices));
+};
+
 const reconcileLocalGiftCards = (serverCards: GiftCard[]): GiftCard[] => {
   const cards = readLocalGiftCards();
   const reconciled = cards.filter((localCard) => {
@@ -400,7 +427,14 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
       }),
     })
       .then(readScriptResponse)
-      .then(() => onRefresh())
+      .then((result) => {
+        const realId = result?.id ? String(result.id) : "";
+        if (realId) {
+          reconcileGiftCardId(savedCard.id, realId);
+          setLocalCards(readLocalGiftCards());
+        }
+        onRefresh();
+      })
       .catch((error) => {
         console.warn("Gift card background sheet save failed", error);
         setMessage({
