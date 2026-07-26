@@ -7,7 +7,7 @@ import {
   normalizeLink,
   scoreOrderAgainstProduct,
 } from "@/lib/sku-match";
-import { lookupSku, toPinCode } from "@/lib/sku-lookup";
+import { lookupSku, lookupSkuInIndex, primeSkuIndex, toPinCode } from "@/lib/sku-lookup";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -19,7 +19,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { SkuBarcodeScanner } from "./SkuBarcodeScanner";
+import { SkuNumberScanner } from "./SkuNumberScanner";
 import { preloadSkuLabelReader } from "./skuOcrWorker";
 
 // Codes are stored as a 6-7 digit tail, so the field behaves like a PIN pad.
@@ -248,6 +248,9 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
 
   const openSearch = () => {
     preloadSkuLabelReader();
+    // Pull the codes down while the user is still reaching for the scanner, so
+    // the first scan is answered from memory rather than over the network.
+    void primeSkuIndex();
     setSelectedBox(initialBoxName);
     setSkuQuery("");
     setApiResults([]);
@@ -336,6 +339,16 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
     if (cached) {
       // Re-typing or backspacing to a code already looked up is instant.
       setApiResults(dedupeApiResults(cached));
+      setIsSearching(false);
+      return;
+    }
+
+    // The downloaded index answers in the same frame - no request, no debounce
+    // and no spinner, which is the only way this can feel immediate.
+    const fromIndex = lookupSkuInIndex(skuQuery);
+    if (fromIndex) {
+      skuSearchCache.set(skuQuery, fromIndex);
+      setApiResults(dedupeApiResults(fromIndex));
       setIsSearching(false);
       return;
     }
@@ -623,7 +636,11 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
           </div>
 
           {isScannerOpen && (
-            <SkuBarcodeScanner onScan={handleScannedText} onClose={() => setIsScannerOpen(false)} />
+            <SkuNumberScanner
+              onScan={handleScannedText}
+              onClose={() => setIsScannerOpen(false)}
+              maxDigits={PIN_MAX_DIGITS}
+            />
           )}
         </>
       )}
