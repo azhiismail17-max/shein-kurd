@@ -49,8 +49,21 @@ export interface SkuQueueEntry {
  * Add one pending row for the extractor bot. Resolves to true only when the row
  * was actually created.
  */
+// The SHEIN app's own "Share" sheet sometimes hands over a whole message -
+// "I found some great items at SHEIN! ... https://..." - rather than a bare
+// link, and that full sentence can end up pasted into the order's link field.
+// The bot can only ever open a URL, so a share-text blob queued as-is is a
+// guaranteed miss: five browser launches that never find anything, always for
+// exactly this reason. Pull out just the URL before it ever reaches the queue.
+const extractUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (/^https?:\/\/\S+$/i.test(trimmed)) return trimmed;
+  const match = trimmed.match(/https?:\/\/\S+/i);
+  return match ? match[0] : "";
+};
+
 export async function queueOrderForSkuExtraction(entry: SkuQueueEntry): Promise<boolean> {
-  const link = String(entry.link || "").trim();
+  const link = extractUrl(String(entry.link || ""));
   const name = String(entry.name || "").trim();
 
   // With no link there is nothing for the bot to open, so a row would just sit
