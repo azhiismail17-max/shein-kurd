@@ -4,6 +4,7 @@ import { fetchWithRetry } from "./fetchWithRetry";
 
 const PUSH_REGISTRY_SHEET = "__push_registry__";
 const PUSH_SUBSCRIPTION_PREFIX = "PUSH_SUB_V1:";
+const REGISTERED_ENDPOINT_KEY = "phone_push_v3_endpoint";
 
 export type PushRegistrationResult =
   | { ok: true; token: string; systems: Array<"kurdistani" | "iraqi"> }
@@ -165,6 +166,7 @@ export async function enableWarningPushNotifications({
     localStorage.setItem("phone_push_v3_enabled", "true");
     localStorage.setItem("kurdistani_phone_push_v2_enabled", "true");
     localStorage.setItem("iraqi_phone_push_v2_enabled", "true");
+    localStorage.setItem(REGISTERED_ENDPOINT_KEY, subscription.endpoint);
     window.dispatchEvent(new CustomEvent("phone-push:enabled", { detail: { system } }));
     return { ok: true, token: subscription.endpoint, systems: ["kurdistani", "iraqi"] };
   } catch (error) {
@@ -175,6 +177,68 @@ export async function enableWarningPushNotifications({
   }
 }
 
+// A browser silently replaces a push subscription from time to time (and drops
+// it entirely if storage is cleared). Nothing used to notice: the "enabled" flag
+// stayed set, so this device was never registered again and the saved endpoint
+// quietly went dead - the phone simply stopped receiving anything. This re-saves
+// the current subscription whenever it no longer matches what was registered,
+// and writes nothing at all while the endpoint is unchanged.
+export async function refreshPushRegistration({
+  role,
+  username,
+}: {
+  role: string;
+  username: string;
+}) {
+  if (localStorage.getItem("phone_push_v3_enabled") !== "true") return;
+  if (!canRoleUsePush(role)) return;
+  if (!("Notification" in window) || !("PushManager" in window)) return;
+  if (Notification.permission !== "granted") return;
+
+  try {
+    const serviceWorkerRegistration = await getServiceWorkerRegistration();
+    if (!serviceWorkerRegistration) return;
+
+    const publicKey = urlBase64ToUint8Array(await getPushPublicKey());
+    let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+    if (subscription && !hasMatchingApplicationServerKey(subscription, publicKey)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await serviceWorkerRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: publicKey,
+      });
+    }
+
+    if (localStorage.getItem(REGISTERED_ENDPOINT_KEY) === subscription.endpoint) return;
+
+    const serialized = subscription.toJSON();
+    const subscriptionId = await getSubscriptionId(subscription.endpoint);
+    const rolePrefix = getRolePrefix(role);
+    await Promise.all([
+      saveSubscriptionForSystem({
+        scriptUrl: KURDISTANI_SCRIPT_URL,
+        role: rolePrefix,
+        username,
+        subscriptionId,
+        serialized,
+      }),
+      saveSubscriptionForSystem({
+        scriptUrl: IRAQI_SCRIPT_URL,
+        role: rolePrefix,
+        username,
+        subscriptionId,
+        serialized,
+      }),
+    ]);
+    localStorage.setItem(REGISTERED_ENDPOINT_KEY, subscription.endpoint);
+  } catch (error) {
+    console.warn("Could not refresh this phone's push registration", error);
+  }
+}
+
 export async function disableWarningPushNotifications(_system: "kurdistani" | "iraqi") {
   const registration = await navigator.serviceWorker?.getRegistration("/");
   const subscription = await registration?.pushManager.getSubscription();
@@ -182,4 +246,5 @@ export async function disableWarningPushNotifications(_system: "kurdistani" | "i
   localStorage.removeItem("phone_push_v3_enabled");
   localStorage.removeItem("kurdistani_phone_push_v2_enabled");
   localStorage.removeItem("iraqi_phone_push_v2_enabled");
+  localStorage.removeItem(REGISTERED_ENDPOINT_KEY);
 }

@@ -1,7 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BellRing, CheckCircle2, Smartphone, X } from "lucide-react";
 import { toast } from "sonner";
-import { canRoleUsePush, enableWarningPushNotifications } from "@/lib/pushNotifications";
+import {
+  canRoleUsePush,
+  enableWarningPushNotifications,
+  refreshPushRegistration,
+} from "@/lib/pushNotifications";
 
 interface PushNotificationOnboardingProps {
   role?: string | null;
@@ -50,6 +54,17 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
     window.addEventListener("phone-push:enabled", handleEnabled);
     return () => window.removeEventListener("phone-push:enabled", handleEnabled);
   }, []);
+
+  // Keep an already-enabled device registered under its current subscription,
+  // so a rotated endpoint cannot leave this phone silently unreachable.
+  useEffect(() => {
+    if (!role || !canRoleUsePush(role)) return;
+    const usernameKey = system === "iraqi" ? "iraqi_auth_username" : "auth_username";
+    refreshPushRegistration({
+      role,
+      username: localStorage.getItem(usernameKey) || role,
+    });
+  }, [role, system]);
 
   const dismissForSession = () => {
     sessionStorage.setItem(SESSION_DISMISSED_KEY, "true");
