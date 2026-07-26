@@ -368,7 +368,19 @@ export function getLinkedOrdersInfo(order: Order, allOrders: Order[]) {
   );
 
   const groupOrders = [order, ...linkedOrders];
-  const shipping = getOrderShipping(order);
+
+  // One delivery for the whole group, so the charge cannot depend on which of
+  // the linked orders happens to be open. Reading it off the open order meant a
+  // group under the free-shipping threshold showed a different total from each
+  // of its own orders - 38,000 from one and 40,000 from another for the same
+  // group. The highest charge in the group is used: linked orders belong to one
+  // customer and should share a destination, and where the recorded places
+  // disagree this is the one that cannot undercharge. It also stops a stray
+  // "No location" row from wiping out a real delivery charge.
+  const shipping = groupOrders.reduce(
+    (highest, item) => Math.max(highest, getOrderShipping(item)),
+    0,
+  );
   const combinedDisplayPrice = groupOrders.reduce(
     (sum, item) => sum + getDisplayPrice(item, allOrders),
     0,
