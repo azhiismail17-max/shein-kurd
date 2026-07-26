@@ -184,6 +184,17 @@ const toSafeUrl = (url: string) => {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 };
 
+// A total link is usually far too long to read. Showing the site it points at
+// on its own line makes a saved link recognisable at a glance, with the full
+// address kept underneath.
+const getBoxLinkHost = (url: string) => {
+  try {
+    return new URL(toSafeUrl(url)).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+};
+
 const getSavedBoxLinkMedia = (link?: BoxLink) => {
   const legacy = parseBoxLinkMedia(link?.image_url);
   return {
@@ -293,6 +304,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   // default - editing it back to a plain input requires pressing "Edit"
   // first, so it can't be overwritten by an accidental keystroke.
   const [editingLinkBox, setEditingLinkBox] = useState<string | null>(null);
+  const [copiedLinkBox, setCopiedLinkBox] = useState<string | null>(null);
   const [boxLinks, setBoxLinks] = useState<BoxLink[]>(() => readLocalBoxLinks());
   const [boxLinkInputs, setBoxLinkInputs] = useState<
     Record<string, { total_link: string; pictures: string[]; warnings: string[] }>
@@ -796,12 +808,23 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
     [boxLinkInputs, canManageBoxLinks, getBoxLinkForBox, getBoxSheetName, role],
   );
 
-  const copyBoxTotalLink = useCallback((link: string) => {
+  const copyBoxTotalLink = useCallback((link: string, boxName?: string) => {
     const safeLink = toSafeUrl(link);
     if (!safeLink) return;
     navigator.clipboard
       .writeText(safeLink)
-      .then(() => toast.success("Link copied"))
+      .then(() => {
+        toast.success("Link copied");
+        // Confirm on the button itself, so the copy is obvious without
+        // having to catch the toast before it disappears.
+        if (boxName) {
+          setCopiedLinkBox(boxName);
+          window.setTimeout(
+            () => setCopiedLinkBox((current) => (current === boxName ? null : current)),
+            1800,
+          );
+        }
+      })
       .catch(() => toast.error("Could not copy link"));
   }, []);
 
@@ -2211,83 +2234,105 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                     </div>
 
                     <div className="space-y-3">
-                      <label className="min-w-0 space-y-1.5">
-                        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                          <Link2 size={11} /> Total Link
-                        </span>
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                            <Link2 size={11} /> Total Link
+                          </span>
+                          {boxLinkDraft.total_link.trim() && !isLinkEditable && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                              <Check size={10} /> Saved
+                            </span>
+                          )}
+                        </div>
                         {boxLinkDraft.total_link.trim() && !isLinkEditable ? (
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <div className="h-10 min-w-0 flex-1 truncate rounded-lg border border-border bg-secondary/40 px-3 text-sm leading-10 text-foreground">
-                              {boxLinkDraft.total_link}
+                          <div className="space-y-2">
+                            <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-2.5">
+                              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                <Link2 size={16} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-bold text-foreground">
+                                  {getBoxLinkHost(boxLinkDraft.total_link) ||
+                                    boxLinkDraft.total_link}
+                                </span>
+                                <span className="mt-0.5 block truncate text-[11px] font-medium text-muted-foreground">
+                                  {boxLinkDraft.total_link}
+                                </span>
+                              </span>
                             </div>
-                            <a
-                              href={toSafeUrl(boxLinkDraft.total_link)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500 text-white shadow-sm transition-colors hover:bg-sky-600"
-                              title="Open total link"
-                            >
-                              <ExternalLink size={15} />
-                            </a>
-                            <button
-                              type="button"
-                              onClick={() => copyBoxTotalLink(boxLinkDraft.total_link)}
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground shadow-sm transition-colors hover:bg-secondary/80"
-                              title="Copy total link"
-                              aria-label="Copy total link"
-                            >
-                              <Copy size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingLinkBox(box.box_name)}
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-secondary"
-                              title="Edit total link"
-                              aria-label="Edit total link"
-                            >
-                              <Pencil size={15} />
-                            </button>
+                            <div className="flex items-stretch gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  copyBoxTotalLink(boxLinkDraft.total_link, box.box_name)
+                                }
+                                className={`flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold text-white shadow-sm transition-colors active:scale-[0.99] ${copiedLinkBox === box.box_name ? "bg-emerald-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
+                              >
+                                {copiedLinkBox === box.box_name ? (
+                                  <>
+                                    <Check size={16} /> Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={16} /> Copy link
+                                  </>
+                                )}
+                              </button>
+                              <a
+                                href={toSafeUrl(boxLinkDraft.total_link)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-600 transition-colors hover:bg-sky-500/20 dark:text-sky-400"
+                                title="Open total link"
+                                aria-label="Open total link"
+                              >
+                                <ExternalLink size={16} />
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => setEditingLinkBox(box.box_name)}
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                                title="Edit total link"
+                                aria-label="Edit total link"
+                              >
+                                <Pencil size={16} />
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <input
-                              autoFocus
-                              value={boxLinkDraft.total_link}
-                              onChange={(e) =>
-                                setBoxLinkInputs((prev) => ({
-                                  ...prev,
-                                  [boxLinkKey]: { ...boxLinkDraft, total_link: e.target.value },
-                                }))
-                              }
-                              placeholder="Paste the total order link"
-                              inputMode="url"
-                              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-secondary/40 px-3 text-sm outline-none transition-all focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
-                            />
-                            {boxLinkDraft.total_link.trim() && (
-                              <>
-                                <a
-                                  href={toSafeUrl(boxLinkDraft.total_link)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500 text-white shadow-sm transition-colors hover:bg-sky-600"
-                                  title="Open total link"
-                                >
-                                  <ExternalLink size={15} />
-                                </a>
-                                <button
-                                  type="button"
-                                  onClick={() => copyBoxTotalLink(boxLinkDraft.total_link)}
-                                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground shadow-sm transition-colors hover:bg-secondary/80"
-                                  title="Copy total link"
-                                  aria-label="Copy total link"
-                                >
-                                  <Copy size={15} />
-                                </button>
-                              </>
+                          <div className="space-y-2">
+                            <div className="relative min-w-0">
+                              <Link2
+                                size={15}
+                                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                              />
+                              <input
+                                autoFocus
+                                value={boxLinkDraft.total_link}
+                                onChange={(e) =>
+                                  setBoxLinkInputs((prev) => ({
+                                    ...prev,
+                                    [boxLinkKey]: { ...boxLinkDraft, total_link: e.target.value },
+                                  }))
+                                }
+                                placeholder="Paste the total order link"
+                                inputMode="url"
+                                className="h-11 w-full min-w-0 rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground/70 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/15"
+                              />
+                            </div>
+                            {savedBoxLink?.total_link?.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingLinkBox(null)}
+                                className="text-[11px] font-bold text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                              >
+                                Cancel editing
+                              </button>
                             )}
                           </div>
                         )}
-                      </label>
+                      </div>
 
                       <div className="grid grid-cols-2 gap-2">
                         <label
