@@ -38,6 +38,11 @@ var ACTIVE_SHEET_SETTING_KEY = "active_sheet";
 var GIFT_CARD_SHEET_NAME = "Gift Card";
 var GIFT_CARD_OLD_SHEET_NAME = "GiftCards";
 var BOX_LINK_SHEET_NAME = "Box Link";
+// Returned with every gift card and box link reply. It is the one reliable way
+// to tell from outside whether this exact code is what the /exec URL is really
+// serving - a deployment that was saved but never published to a new version
+// keeps answering with the previous code and looks identical otherwise.
+var SCRIPT_VERSION = "2026-07-26-gift-card-v2";
 
 function getActiveSheetName() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -85,6 +90,76 @@ function setActiveSheetName(sheetName) {
   return { status: "success", active_sheet: cleanSheetName };
 }
 
+var GIFT_CARD_HEADERS = ["ID", "Date", "Card Number", "Card Pin", "Payment Method", "Payment Other", "Card Price", "Spent", "Remaining", "Linked Boxes", "Notes"];
+
+function giftCardSheetUsesCurrentLayout(sheet) {
+  var firstRow = sheet.getRange(1, 1, 1, 4).getValues()[0];
+  return firstRow[0].toString().trim() === "ID" && firstRow[2].toString().trim() === "Card Number";
+}
+
+function looksLikeGiftCardHeaderLabel(value) {
+  var text = value.toString().trim().toLowerCase();
+  if (!text) return true;
+  var labels = ["insta", "id", "card number", "name", "instagram", "customer", "#"];
+  for (var i = 0; i < labels.length; i++) {
+    if (text === labels[i]) return true;
+  }
+  return false;
+}
+
+function uniqueSheetName(ss, base) {
+  if (!ss.getSheetByName(base)) return base;
+  for (var suffix = 2; suffix < 50; suffix++) {
+    var candidate = base + " " + suffix;
+    if (!ss.getSheetByName(candidate)) return candidate;
+  }
+  return base + " " + new Date().getTime();
+}
+
+// Before this sheet had its own columns, a gift card was stored as an ordinary
+// order row - card number where an order keeps its Instagram handle, pin where
+// it keeps the name, and no columns at all for Spent, Remaining or Linked
+// Boxes. Reading such a sheet with the current column meaning turns every card
+// into nonsense, and writing to it would overwrite real values in the wrong
+// place. So the old sheet is never reinterpreted or edited: it is kept intact
+// under its own name, and the cards found on it are copied into a fresh sheet
+// in the current layout. Spent starts at zero because the old layout genuinely
+// never had anywhere to record it.
+function convertLegacyGiftCardSheet(ss, legacySheet) {
+  var recovered = [];
+  var lastRow = legacySheet.getLastRow();
+  var lastColumn = Math.max(legacySheet.getLastColumn(), 18);
+  if (lastRow >= 2) {
+    var values = legacySheet.getRange(2, 1, lastRow - 1, lastColumn).getValues();
+    var displayed = legacySheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var cardNumber = (row[0] === null || row[0] === undefined) ? "" : row[0].toString().trim();
+      if (!cardNumber || looksLikeGiftCardHeaderLabel(cardNumber)) continue;
+      var cardPin = (row[1] === null || row[1] === undefined) ? "" : row[1].toString().trim();
+      cardPin = cardPin.replace(/^PIN\s+/i, "");
+      var price = parseFloat(row[4]) || 300;
+      var paymentMethod = (row[6] === null || row[6] === undefined) ? "" : row[6].toString().trim();
+      if (paymentMethod !== "Zaincash" && paymentMethod !== "Qi card" && paymentMethod !== "Other") {
+        paymentMethod = "";
+      }
+      var notes = (row[17] === null || row[17] === undefined) ? "" : row[17].toString().trim();
+      var date = displayed[i][16] ? displayed[i][16].toString() : "";
+      if (!date) date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
+      recovered.push([Utilities.getUuid(), date, cardNumber, cardPin, paymentMethod, "", price, 0, price, "", notes]);
+    }
+  }
+
+  legacySheet.setName(uniqueSheetName(ss, GIFT_CARD_SHEET_NAME + " (old layout)"));
+  var sheet = ss.insertSheet(GIFT_CARD_SHEET_NAME);
+  sheet.getRange(1, 1, 1, GIFT_CARD_HEADERS.length).setValues([GIFT_CARD_HEADERS]);
+  if (recovered.length > 0) {
+    sheet.getRange(2, 1, recovered.length, GIFT_CARD_HEADERS.length).setValues(recovered);
+  }
+  SpreadsheetApp.flush();
+  return sheet;
+}
+
 function getOrCreateGiftCardSheet(ss) {
   var sheet = ss.getSheetByName(GIFT_CARD_SHEET_NAME);
   var oldSheet = ss.getSheetByName(GIFT_CARD_OLD_SHEET_NAME);
@@ -92,8 +167,11 @@ function getOrCreateGiftCardSheet(ss) {
     try { oldSheet.setName(GIFT_CARD_SHEET_NAME); } catch(e) {}
     sheet = ss.getSheetByName(GIFT_CARD_SHEET_NAME) || oldSheet;
   }
+  if (sheet && sheet.getLastRow() > 1 && !giftCardSheetUsesCurrentLayout(sheet)) {
+    sheet = convertLegacyGiftCardSheet(ss, sheet);
+  }
   if (!sheet) sheet = ss.insertSheet(GIFT_CARD_SHEET_NAME);
-  var headers = ["ID", "Date", "Card Number", "Card Pin", "Payment Method", "Payment Other", "Card Price", "Spent", "Remaining", "Linked Boxes", "Notes"];
+  var headers = GIFT_CARD_HEADERS;
   var existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
   var needsHeader = false;
   for (var i = 0; i < headers.length; i++) {
@@ -245,6 +323,7 @@ function linkGiftCardBox(data) {
 }
 
 function giftCardJsonResponse(result) {
+  result.script_version = SCRIPT_VERSION;
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -419,6 +498,7 @@ function saveBoxLink(data) {
 }
 
 function boxLinkJsonResponse(result) {
+  result.script_version = SCRIPT_VERSION;
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -1411,6 +1491,15 @@ function doGet(e) {
     var allSheetNames = [];
     
     var params = e && e.parameter ? e.parameter : {};
+    // Opening ?action=script_version in a browser answers the only question that
+    // matters after publishing: is this URL actually serving this code yet.
+    if (params.action === "script_version") {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        script_version: SCRIPT_VERSION,
+        supports: ["get_gift_cards", "get_box_links", "save_box_link", "spend_gift_card", "link_gift_card_box"]
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
     var earlyGiftCardResponse = handleGiftCardAction(params);
     if (earlyGiftCardResponse) return earlyGiftCardResponse;
     var earlyBoxLinkResponse = handleBoxLinkAction(params);
