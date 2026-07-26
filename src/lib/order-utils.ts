@@ -197,8 +197,13 @@ const hasSameInstagram = (a: Order, b: Order) => {
  * that match on neither belong to different people, so linking them is refused
  * outright rather than left to judgement.
  */
-export const isSameCustomer = (a: Order, b: Order): boolean =>
-  hasSameValidPhone(a, b) || hasSameInstagram(a, b);
+export const isSameCustomer = (a: Order, b: Order): boolean => {
+  // Proof of identity is not enough on its own: two orders a month apart are two
+  // shipments even for the same person, so the week window applies to a link
+  // made by hand exactly as it does to one made automatically.
+  if (!isWithinLinkWindow(a, b)) return false;
+  return hasSameValidPhone(a, b) || hasSameInstagram(a, b);
+};
 
 const parseOrderTime = (value: unknown) => {
   const raw = String(value || "").trim();
@@ -224,16 +229,24 @@ const parseOrderTime = (value: unknown) => {
   return Number.isNaN(time) ? null : time;
 };
 
-const isWithinCustomerLinkWindow = (a: Order, b: Order) => {
+const LINK_WINDOW_DAYS = 7;
+const LINK_WINDOW_MS = LINK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Orders may only be linked when they were placed within a week of each other.
+ * Beyond that they are separate shipments, however clearly they belong to the
+ * same person. A missing or unreadable date counts as outside the window - it
+ * cannot be shown to be inside it, and guessing here merges real orders.
+ */
+export const isWithinLinkWindow = (a: Order, b: Order) => {
   const aTime = parseOrderTime(a.date);
   const bTime = parseOrderTime(b.date);
   if (aTime === null || bTime === null) return false;
-  const maxDiffMs = 3 * 24 * 60 * 60 * 1000;
-  return Math.abs(aTime - bTime) <= maxDiffMs;
+  return Math.abs(aTime - bTime) <= LINK_WINDOW_MS;
 };
 
 const isSameCustomerReceipt = (a: Order, b: Order) => {
-  if (!isWithinCustomerLinkWindow(a, b)) return false;
+  if (!isWithinLinkWindow(a, b)) return false;
   return hasSameValidPhone(a, b);
 };
 
