@@ -1,3 +1,12 @@
+import {
+  compact,
+  extractIdentifiers,
+  getProductSignals,
+  normalize,
+  normalizeBoxName,
+  normalizeLink,
+  scoreOrderAgainstProduct,
+} from "@/lib/sku-match";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -63,30 +72,6 @@ interface PreparedOrder<T extends SkuSearchOrder> {
   link: string;
   productKey: string;
 }
-
-const normalize = (value: unknown) =>
-  String(value ?? "")
-    .trim()
-    .toLowerCase();
-const compact = (value: unknown) => normalize(value).replace(/[^a-z0-9]+/g, "");
-const normalizeLink = (value: unknown) =>
-  normalize(value)
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/$/, "");
-const normalizeBoxName = (value: unknown) => normalize(value).replace(/^box[\s-]*/i, "");
-
-const extractIdentifiers = (value: unknown) => {
-  const text = normalize(value);
-  const separated = text.match(/[a-z]{0,4}[\s:_-]*\d(?:[\s:_-]*\d){5,}/gi) || [];
-  return [
-    ...new Set(
-      separated
-        .map((item) => item.replace(/[^a-z0-9]/gi, "").toLowerCase())
-        .filter((item) => item.length >= 6),
-    ),
-  ];
-};
 
 const getApiQueries = (value: string) => {
   const identifiers = extractIdentifiers(value).sort((a, b) => {
@@ -226,48 +211,34 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
   const localMatches = useMemo(() => matchOrders(scopedOrders, skuQuery), [scopedOrders, skuQuery]);
 
   const findOrdersForApiResult = (result: ApiResult) => {
-    const resultText = [
-      result.sku,
-      result.SKU,
-      result.code,
-      result.product_code,
-      result.link,
-      result.url,
-      result.productLink,
-      result.name,
-      result.customer,
-      result.insta,
-      result.username,
-      skuQuery,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const resultLink = normalizeLink(result.link || result.url || result.productLink);
-    const resultProductKey = compact(resultLink);
-    const ranked = scopedOrders.map((prepared) => {
-      let score = scorePreparedOrder(prepared, resultText);
-      if (
-        resultLink &&
-        prepared.link &&
-        (prepared.link.includes(resultLink) || resultLink.includes(prepared.link))
-      )
-        score += 160;
-      if (
-        resultProductKey &&
-        prepared.productKey &&
-        (prepared.productKey.includes(resultProductKey) ||
-          resultProductKey.includes(prepared.productKey))
-      )
-        score += 160;
-      return { prepared, score };
+    // Only the code that was scanned and the product's own codes and link may
+    // identify an order. The customer name and product title are left out on
+    // purpose - they are prose, and matching on prose is what pulled in other
+    // people's boxes.
+    const signals = getProductSignals({
+      identifierSources: [skuQuery, result.sku, result.SKU, result.code, result.product_code],
+      link: result.link || result.url || result.productLink,
     });
 
-    return ranked
+    const ranked = scopedOrders
+      .map((prepared) => ({ prepared, score: scoreOrderAgainstProduct(prepared, signals) }))
       .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 12)
-      .map((item) => item.prepared.order);
+      .sort((a, b) => b.score - a.score);
+
+    // The same customer can have several rows in one box. Showing "Box 48 -
+    // @lx.dimen" twice tells the packer nothing, so one chip per box+customer.
+    const seen = new Set<string>();
+    const unique = [];
+    for (const { prepared } of ranked) {
+      const order = prepared.order;
+      const key = `${normalizeBoxName(getOrderBoxName(order) || order.box_name)}|${compact(
+        order.insta || order.name,
+      )}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(order);
+    }
+    return unique;
   };
 
   const visibleApiResults = apiResults
@@ -605,7 +576,7 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
                         </p>
                         {resultOrders.length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-1.5">
-                            {resultOrders.slice(0, 8).map((order) => {
+                            {resultOrders.slice(0, 12).map((order) => {
                               const boxName = getOrderBoxName(order);
                               return (
                                 <button
@@ -619,6 +590,11 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
                                 </button>
                               );
                             })}
+                            {resultOrders.length > 12 && (
+                              <span className="inline-flex items-center rounded bg-secondary px-2 py-1 text-xs font-semibold text-muted-foreground">
+                                +{resultOrders.length - 12} more
+                              </span>
+                            )}
                           </div>
                         ) : fallbackBox ? (
                           <p className="mt-1 inline-flex rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
