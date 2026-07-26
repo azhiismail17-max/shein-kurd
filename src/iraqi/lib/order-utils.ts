@@ -170,24 +170,31 @@ const hasSameValidPhone = (a: Order, b: Order) => {
   return aPhones.some((phone) => bPhones.includes(phone));
 };
 
-const normalizeCustomerName = (value: unknown) =>
+// An Instagram handle identifies one person. A display name does not - two
+// different customers called "Sara" are two different customers, and matching on
+// that is how unrelated orders used to end up merged. So the handle is compared,
+// and the name is not considered at all.
+const normalizeHandle = (value: unknown) =>
   String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ");
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "");
 
-const hasSameCustomerName = (a: Order, b: Order) => {
-  const aName = normalizeCustomerName(a.name || a.insta);
-  const bName = normalizeCustomerName(b.name || b.insta);
-  return Boolean(aName) && aName === bName;
+const hasSameInstagram = (a: Order, b: Order) => {
+  const aHandle = normalizeHandle(a.insta);
+  const bHandle = normalizeHandle(b.insta);
+  return Boolean(aHandle) && aHandle === bHandle;
 };
 
 /**
- * Same phone or same name - the only basis on which orders may be linked,
- * manually or automatically, so unrelated customers never end up merged.
+ * The same phone number or the same Instagram handle. This is the only basis on
+ * which two orders may ever be linked - automatically or by hand. Two orders
+ * that match on neither belong to different people, so linking them is refused
+ * outright rather than left to judgement.
  */
 export const isSameCustomer = (a: Order, b: Order): boolean =>
-  hasSameValidPhone(a, b) || hasSameCustomerName(a, b);
+  hasSameValidPhone(a, b) || hasSameInstagram(a, b);
 
 const parseOrderTime = (value: unknown) => {
   const raw = String(value || "").trim();

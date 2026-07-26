@@ -511,14 +511,17 @@ const OrderListView: React.FC<OrderListViewProps> = ({
       setIsLinking(false);
       return;
     }
-    // Orders may only be linked when they belong to the same customer (same
-    // phone or same name) - this is what stopped unrelated orders from
-    // accidentally getting merged together.
+    // Orders may only be linked when they are provably the same customer: the
+    // same phone number, or the same Instagram handle. Nothing else counts - a
+    // shared display name is not proof, since two customers can share a name.
+    // A group that fails this is refused outright, by hand as much as
+    // automatically, so unrelated orders can never be merged.
     const reference = selectedObjArray[0];
     const mismatched = selectedObjArray.find((o) => !isSameCustomer(reference, o));
     if (mismatched) {
       alert(
-        "These orders can't be linked: they don't share the same phone number or customer name.",
+        "These orders can't be linked. Orders may only be linked when they share " +
+          "the same phone number or the same Instagram handle.",
       );
       setIsLinking(false);
       return;

@@ -61,6 +61,17 @@ const digitsOnly = (value: string) => value.replace(/\D+/g, "");
 const tail = (value: string, maxDigits: number) =>
   value.length > maxDigits ? value.slice(-maxDigits) : value;
 
+export interface ProductNumberRead {
+  digits: string;
+  /**
+   * True when the number was found by its "sr" prefix rather than by being the
+   * longest run of digits. That is strong structural evidence - the label said
+   * outright which line this is - so the caller can accept it on the first frame
+   * instead of waiting for a confirming read.
+   */
+  viaPrefix: boolean;
+}
+
 /**
  * Pull the product number out of whatever the recogniser returned.
  *
@@ -70,14 +81,14 @@ const tail = (value: string, maxDigits: number) =>
  * 21 digits against the package's 13, so length alone still picks the right one
  * when the prefixes are too blurred to read.
  */
-export const extractNumberFromOcrText = (text: string, maxDigits = 7) => {
+export const readProductNumber = (text: string, maxDigits = 7): ProductNumberRead => {
   const raw = String(text || "");
 
   // 1. The product line, identified by its prefix. The most reliable signal.
   const product = raw.match(PRODUCT_CODE);
   if (product) {
     const digits = digitsOnly(product[1]);
-    if (digits.length >= 6) return tail(digits, maxDigits);
+    if (digits.length >= 6) return { digits: tail(digits, maxDigits), viaPrefix: true };
   }
 
   // 2. Otherwise gather every plausible run, minus the package code.
@@ -101,7 +112,7 @@ export const extractNumberFromOcrText = (text: string, maxDigits = 7) => {
   }
   for (const run of raw.match(/\d{6,}/g) || []) consider(run);
 
-  if (candidates.length === 0) return "";
+  if (candidates.length === 0) return { digits: "", viaPrefix: false };
 
   let best = candidates[0];
   for (const candidate of candidates) {
@@ -110,5 +121,9 @@ export const extractNumberFromOcrText = (text: string, maxDigits = 7) => {
     if (candidate.length >= best.length) best = candidate;
   }
 
-  return tail(best, maxDigits);
+  return { digits: tail(best, maxDigits), viaPrefix: false };
 };
+
+/** Just the digits, for callers that do not care how they were found. */
+export const extractNumberFromOcrText = (text: string, maxDigits = 7) =>
+  readProductNumber(text, maxDigits).digits;
