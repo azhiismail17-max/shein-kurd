@@ -91,8 +91,7 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
     if (result.ok) {
       setIsOpen(false);
       toast.success("Real phone notifications are enabled", {
-        description:
-          "Kurdistani and Iraqi warnings and total-link alerts are connected to this device.",
+        description: "Kurdistani and Iraqi alerts are connected to this device.",
       });
       return;
     }
@@ -134,11 +133,11 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
           <div className="space-y-3 text-sm">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 shrink-0 text-green-600" size={18} />
-              <span>Warnings from Kurdistani and Iraqi</span>
+              <span>Warnings and total links from Kurdistani and Iraqi</span>
             </div>
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 shrink-0 text-green-600" size={18} />
-              <span>New total-link alerts for the owner/admin</span>
+              <span>Deleted, edited, purchased and delivered orders</span>
             </div>
             <div className="flex items-start gap-3">
               <Smartphone className="mt-0.5 shrink-0 text-primary" size={18} />

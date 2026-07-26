@@ -55,8 +55,6 @@ export const sendNotification = async (
 ) => {
   if (!senderRole) return;
 
-  if (type !== "warning" && type !== "link" && !isWarning) return;
-
   let targetRoles = getTargetRoles(type, senderRole);
   if (explicitTarget) {
     targetRoles = Array.isArray(explicitTarget) ? explicitTarget : [explicitTarget];

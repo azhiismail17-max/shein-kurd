@@ -24,6 +24,7 @@ interface GiftCardsViewProps {
   onRefresh: () => void;
   orders?: Order[];
   viewingMonth?: string;
+  backendIsLegacy?: boolean;
 }
 
 const CARD_PRICES = [100, 300, 500, 800, 1000];
@@ -38,6 +39,8 @@ const money = (value: number) => `$${Number(value || 0).toLocaleString()}`;
 const iqdMoney = (value: number) => `${Math.round(Number(value || 0)).toLocaleString()} IQD`;
 const parseAmount = (value: string) => Number(String(value || "").replace(/[^0-9.-]+/g, "")) || 0;
 const hasGiftCardBalance = (card: GiftCard) => Number(card.remaining || 0) > 0;
+const isUsedGiftCard = (card: GiftCard) =>
+  Number(card.spent || 0) > 0 || (card.linked_boxes?.length || 0) > 0;
 const sortGiftCardsByBalance = (cards: GiftCard[]) =>
   cards
     .map((card, index) => ({ card, index }))
@@ -216,6 +219,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   onRefresh,
   orders = [],
   viewingMonth = "",
+  backendIsLegacy = false,
 }) => {
   const [cardNumber, setCardNumber] = useState("");
   const [cardPin, setCardPin] = useState("");
@@ -235,7 +239,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showRates, setShowRates] = useState(false);
-  const [filter, setFilter] = useState<"all" | "available">("all");
+  const [filter, setFilter] = useState<"all" | "available" | "used">("all");
   const [localCards, setLocalCards] = useState<GiftCard[]>(() => readLocalGiftCards());
   const [iqdRates, setIqdRates] = useState(() => readLocalRates());
   const [boxPrices, setBoxPrices] = useState<Record<string, number>>(() => readBoxPrices());
@@ -275,10 +279,21 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   }, [giftCards, localCards]);
 
   const availableCards = useMemo(() => displayedCards.filter(hasGiftCardBalance), [displayedCards]);
-  const visibleCards = useMemo(
-    () => (filter === "available" ? availableCards : displayedCards),
-    [availableCards, displayedCards, filter],
+  // Every card the money has actually been spent from, fully drained ones first,
+  // so a used card is never buried at the bottom of the whole wallet.
+  const usedCards = useMemo(
+    () =>
+      displayedCards
+        .filter(isUsedGiftCard)
+        .slice()
+        .sort((a, b) => Number(hasGiftCardBalance(a)) - Number(hasGiftCardBalance(b))),
+    [displayedCards],
   );
+  const visibleCards = useMemo(() => {
+    if (filter === "available") return availableCards;
+    if (filter === "used") return usedCards;
+    return displayedCards;
+  }, [availableCards, displayedCards, filter, usedCards]);
   const boxOptions = useMemo(() => {
     const map = new Map<
       string,
@@ -662,7 +677,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
   return (
     <div className="mx-auto max-w-6xl space-y-4 pb-24 animate-slide-up sm:space-y-5 sm:pb-0">
       <div className="sticky top-0 z-10 -mx-3 border-b border-border/60 bg-background/95 px-3 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
-        {filter === "available" ? (
+        {filter !== "all" ? (
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -672,9 +687,13 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
               <ArrowLeft size={18} />
             </button>
             <div className="min-w-0">
-              <h1 className="text-lg font-black tracking-tight sm:text-2xl">Available Cards</h1>
+              <h1 className="text-lg font-black tracking-tight sm:text-2xl">
+                {filter === "used" ? "Used Cards" : "Available Cards"}
+              </h1>
               <p className="text-xs font-semibold text-muted-foreground">
-                {totals.active} cards with balance left
+                {filter === "used"
+                  ? `${usedCards.length} cards already spent from`
+                  : `${totals.active} cards with balance left`}
               </p>
             </div>
           </div>
@@ -732,6 +751,17 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
         </div>
       )}
 
+      {backendIsLegacy && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm font-semibold text-amber-800 dark:text-amber-200">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 break-words">
+            The Google Apps Script is still on an older version, so spending and connected boxes
+            cannot be read back from the sheet yet. Amounts shown here come from this device. Update
+            the script deployment to share them with every device.
+          </span>
+        </div>
+      )}
+
       {filter === "available" ? (
         <div className="rounded-xl border border-primary/20 bg-primary/10 p-4 shadow-sm">
           <div className="text-[11px] font-bold uppercase tracking-wide text-primary">
@@ -742,6 +772,18 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
           </div>
           <div className="text-sm font-bold tabular-nums text-muted-foreground">
             {iqdMoney(totals.remainingIqd)}
+          </div>
+        </div>
+      ) : filter === "used" ? (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-destructive">
+            Total used
+          </div>
+          <div className="mt-1 text-3xl font-black tabular-nums text-destructive">
+            -{money(totals.spent)}
+          </div>
+          <div className="text-sm font-bold tabular-nums text-muted-foreground">
+            -{iqdMoney(totals.spentIqd)}
           </div>
         </div>
       ) : (
@@ -771,9 +813,18 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
               </div>
             </button>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-1">
-              <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                  Used
+              <button
+                type="button"
+                onClick={() => setFilter("used")}
+                className="rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-transform hover:bg-secondary active:scale-[0.99]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    Used
+                  </span>
+                  <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-black text-destructive">
+                    {usedCards.length}
+                  </span>
                 </div>
                 <div className="mt-1 text-xl font-black tabular-nums text-destructive">
                   -{money(totals.spent)}
@@ -781,7 +832,7 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
                 <div className="text-[11px] font-bold tabular-nums text-destructive">
                   -{iqdMoney(totals.spentIqd)}
                 </div>
-              </div>
+              </button>
               <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                   Linked
@@ -1248,7 +1299,11 @@ const GiftCardsView: React.FC<GiftCardsViewProps> = ({
       {visibleCards.length === 0 && (
         <div className="rounded-xl border border-dashed border-border py-12 text-center text-sm font-semibold text-muted-foreground">
           <Plus size={28} className="mx-auto mb-2 opacity-40" />{" "}
-          {filter === "available" ? "No available gift cards" : "No gift cards yet"}
+          {filter === "available"
+            ? "No available gift cards"
+            : filter === "used"
+              ? "No gift card has been used yet"
+              : "No gift cards yet"}
         </div>
       )}
     </div>

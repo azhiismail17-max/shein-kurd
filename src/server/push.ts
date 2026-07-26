@@ -30,6 +30,21 @@ interface StoredBoxLink {
   updated_role?: string;
 }
 
+interface StoredOrderLogRow {
+  RawPayload?: string;
+}
+
+const NOTIFICATION_TITLES: Record<string, string> = {
+  warning: "Warning",
+  link: "Total Link",
+  delete: "Order deleted",
+  edit: "Order edited",
+  approve: "Order purchased",
+  deliver: "Order delivered",
+  cancel: "Order cancelled",
+  custom: "Update",
+};
+
 const getRolePrefix = (role?: string) =>
   String(role || "")
     .trim()
@@ -69,6 +84,95 @@ function json(data: unknown, status = 200) {
   });
 }
 
+// Recovering the registry from the write log means reading every logged write,
+// which is a large response. Notifications can arrive in bursts, so the parsed
+// result is reused briefly instead of refetching the whole log each time.
+const RECOVERED_REGISTRY_TTL_MS = 5 * 60 * 1000;
+const recoveredRegistryCache = new Map<
+  string,
+  { at: number; entries: Array<{ rolePrefix: string; subscription: webPush.PushSubscription }> }
+>();
+
+function parseStoredSubscription(value: unknown) {
+  const stored = String(value || "");
+  if (!stored.startsWith(PUSH_SUBSCRIPTION_PREFIX)) return null;
+  try {
+    const subscription = JSON.parse(
+      stored.slice(PUSH_SUBSCRIPTION_PREFIX.length),
+    ) as webPush.PushSubscription;
+    return subscription?.endpoint ? subscription : null;
+  } catch {
+    return null;
+  }
+}
+
+// The registry lives in the Box Link sheet, which is the fast path. Older Apps
+// Script deployments answer `get_box_links` with the generic order dump instead
+// of the registry, which used to leave this with zero subscribers - every phone
+// silently got nothing. Those deployments still write an entry to the order log
+// for each save, and that entry keeps the whole registration payload, so the
+// same subscriptions stay recoverable from there until the script is updated.
+async function readPushSubscriptions(
+  scriptUrl: string,
+  isTargetRole: (rolePrefix: string) => boolean,
+) {
+  const subscriptions = new Map<string, webPush.PushSubscription>();
+
+  try {
+    const boxLinkData = await getJson(
+      `${scriptUrl}?action=get_box_links&role=owner&t=${Date.now()}`,
+    );
+    const boxLinks = Array.isArray(boxLinkData?.box_links)
+      ? (boxLinkData.box_links as StoredBoxLink[])
+      : [];
+    for (const link of boxLinks) {
+      if (link.sheet_name !== PUSH_REGISTRY_SHEET) continue;
+      if (!isTargetRole(getRolePrefix(link.updated_role))) continue;
+      const subscription = parseStoredSubscription(link.total_link);
+      if (subscription) subscriptions.set(subscription.endpoint, subscription);
+    }
+  } catch (error) {
+    console.error("Could not read the box-link push registry", error);
+  }
+
+  if (subscriptions.size > 0) return { subscriptions, source: "registry" as const };
+
+  const cached = recoveredRegistryCache.get(scriptUrl);
+  let entries =
+    cached && Date.now() - cached.at < RECOVERED_REGISTRY_TTL_MS ? cached.entries : null;
+
+  if (!entries) {
+    entries = [];
+    try {
+      const logData = await getJson(`${scriptUrl}?action=get_orders&t=${Date.now()}`);
+      const rows = Array.isArray(logData?.orders) ? (logData.orders as StoredOrderLogRow[]) : [];
+      for (const row of rows) {
+        const raw = String(row.RawPayload || "");
+        if (!raw.includes(PUSH_SUBSCRIPTION_PREFIX)) continue;
+        let payload: { role?: string; total_link?: string; sheet_name?: string };
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (payload.sheet_name !== PUSH_REGISTRY_SHEET) continue;
+        const subscription = parseStoredSubscription(payload.total_link);
+        if (subscription) entries.push({ rolePrefix: getRolePrefix(payload.role), subscription });
+      }
+      recoveredRegistryCache.set(scriptUrl, { at: Date.now(), entries });
+    } catch (error) {
+      console.error("Could not recover push subscriptions from the write log", error);
+    }
+  }
+
+  for (const entry of entries) {
+    if (!isTargetRole(entry.rolePrefix)) continue;
+    subscriptions.set(entry.subscription.endpoint, entry.subscription);
+  }
+
+  return { subscriptions, source: "write-log" as const };
+}
+
 async function sendPush(request: Request) {
   const { publicKey, privateKey } = getPushConfiguration();
   if (!publicKey || !privateKey) {
@@ -95,44 +199,20 @@ async function sendPush(request: Request) {
     : [];
   const targetsAll = targetRoles.includes("all");
   const hasPhoneTarget = targetsAll || targetRoles.some((role) => ALLOWED_ROLES.has(role));
-  const isAllowedType =
-    notification.type === "link" ||
-    notification.type === "warning" ||
-    notification.isWarning === true;
   const timestamp = Date.parse(String(notification.timestamp || ""));
   const age = Date.now() - timestamp;
   const isFresh = Number.isFinite(timestamp) && age >= -60_000 && age <= 10 * 60 * 1000;
   const wasAlreadySent =
     Array.isArray(notification.readBy) && notification.readBy.includes(PUSH_SENT_MARKER);
 
-  if (!hasPhoneTarget || !isAllowedType || !isFresh) {
+  if (!hasPhoneTarget || !isFresh) {
     return json({ error: "Notification is not eligible for phone push." }, 403);
   }
   if (wasAlreadySent) return json({ status: "already-sent", delivered: 0, failed: 0 });
 
-  const boxLinkData = await getJson(`${scriptUrl}?action=get_box_links&role=owner&t=${Date.now()}`);
-  const boxLinks = Array.isArray(boxLinkData?.box_links)
-    ? (boxLinkData.box_links as StoredBoxLink[])
-    : [];
-  const subscriptions = new Map<string, webPush.PushSubscription>();
-
-  for (const link of boxLinks) {
-    if (link.sheet_name !== PUSH_REGISTRY_SHEET) continue;
-    const rolePrefix = getRolePrefix(link.updated_role);
-    if (!ALLOWED_ROLES.has(rolePrefix)) continue;
-    if (!targetsAll && !targetRoles.includes(rolePrefix)) continue;
-
-    const storedValue = String(link.total_link || "");
-    if (!storedValue.startsWith(PUSH_SUBSCRIPTION_PREFIX)) continue;
-    try {
-      const subscription = JSON.parse(
-        storedValue.slice(PUSH_SUBSCRIPTION_PREFIX.length),
-      ) as webPush.PushSubscription;
-      if (subscription?.endpoint) subscriptions.set(subscription.endpoint, subscription);
-    } catch {
-      // Ignore malformed or legacy registry rows.
-    }
-  }
+  const isTargetRole = (rolePrefix: string) =>
+    ALLOWED_ROLES.has(rolePrefix) && (targetsAll || targetRoles.includes(rolePrefix));
+  const { subscriptions, source } = await readPushSubscriptions(scriptUrl, isTargetRole);
 
   if (subscriptions.size === 0) {
     return json({ status: "no-subscribers", delivered: 0, failed: 0 });
@@ -140,10 +220,10 @@ async function sendPush(request: Request) {
 
   webPush.setVapidDetails("mailto:notifications@shein-kurdwe.vercel.app", publicKey, privateKey);
   const isWarning = notification.type === "warning" || notification.isWarning === true;
+  const systemLabel = system === "iraqi" ? "Iraqi" : "Kurdistani";
+  const kind = isWarning ? "Warning" : NOTIFICATION_TITLES[notification.type] || "Update";
   const payload = JSON.stringify({
-    title: isWarning
-      ? `${system === "iraqi" ? "Iraqi" : "Kurdistani"} Warning`
-      : `${system === "iraqi" ? "Iraqi" : "Kurdistani"} Total Link`,
+    title: `${systemLabel} ${kind}`,
     body: String(notification.message || "").slice(0, 240),
     icon: "/logo-192.png",
     tag: `box-alert-${notificationId}`,
@@ -170,7 +250,7 @@ async function sendPush(request: Request) {
     });
   }
 
-  return json({ status: delivered > 0 ? "sent" : "not-delivered", delivered, failed });
+  return json({ status: delivered > 0 ? "sent" : "not-delivered", delivered, failed, source });
 }
 
 export async function handlePushRequest(request: Request): Promise<Response> {

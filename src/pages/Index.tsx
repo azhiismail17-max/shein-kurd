@@ -52,6 +52,25 @@ const mergeGiftCards = (serverCards: GiftCard[]) => {
   }
   return merged;
 };
+
+// The dedicated Gift Card sheet keeps Spent, Remaining and Linked Boxes. The
+// legacy layout below stores a card as a plain order row, which has no columns
+// for any of that - so reading it can only recover the card's identity and
+// price. Filling the missing figures in as zero would report every already-used
+// card as untouched, so the last known values are carried over instead.
+const hydrateLegacyGiftCard = (card: GiftCard, known?: GiftCard): GiftCard => {
+  const price = Number(card.card_price || 0);
+  const spent = Math.min(Math.max(Number(known?.spent || 0), 0), price);
+  return {
+    ...card,
+    payment_method: card.payment_method || known?.payment_method || "",
+    payment_other: card.payment_other || known?.payment_other || "",
+    notes: card.notes || known?.notes || "",
+    spent,
+    remaining: Math.max(price - spent, 0),
+    linked_boxes: known?.linked_boxes || [],
+  };
+};
 const CalculatorView = React.lazy(() => import("@/components/app/CalculatorView"));
 const CameraSearchModal = React.lazy(() => import("@/components/app/CameraSearchModal"));
 const MessagesView = React.lazy(() => import("@/components/app/MessagesView"));
@@ -167,6 +186,7 @@ const Index: React.FC = () => {
   const autoTransitInFlightRef = useRef<Set<string>>(new Set());
   const [monthlyStats, setMonthlyStats] = useState<Record<string, MonthlyStats>>({});
   const [giftCards, setGiftCards] = useState<GiftCard[]>([]);
+  const [giftCardsBackendIsLegacy, setGiftCardsBackendIsLegacy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadedMonths, setLoadedMonths] = useState<Set<string>>(new Set());
   const [editingOrder, setEditingOrder] = useState<Order | null>(() => {
@@ -459,27 +479,36 @@ const Index: React.FC = () => {
       const text = await res.text();
       const json = JSON.parse(text);
       if (json?.status === "success" && Array.isArray(json.gift_cards)) {
+        setGiftCardsBackendIsLegacy(false);
         setGiftCards(mergeGiftCards(json.gift_cards));
       } else if (json?.status === "success" && Array.isArray(json.data)) {
+        // No `gift_cards` key means the Apps Script deployment predates the
+        // dedicated Gift Card sheet, so only the legacy order rows are readable.
+        setGiftCardsBackendIsLegacy(true);
+        const known = new Map(readLocalGiftCards().map((card) => [card.id, card]));
         setGiftCards(
           mergeGiftCards(
             json.data
               .filter((order: Order) => order.sheet_name === "Gift Card")
               .map((order: Order) => {
                 const price = Number(order.price || 300) || 300;
-                return {
-                  id: String(order.id),
-                  date: String(order.date || ""),
-                  card_number: String(order.insta || ""),
-                  card_pin: String(order.name || "").replace(/^PIN\s+/i, ""),
-                  payment_method: String(order.pics_text || ""),
-                  payment_other: "",
-                  card_price: price,
-                  spent: 0,
-                  remaining: price,
-                  linked_boxes: [],
-                  notes: String(order.note || ""),
-                };
+                const id = String(order.id);
+                return hydrateLegacyGiftCard(
+                  {
+                    id,
+                    date: String(order.date || ""),
+                    card_number: String(order.insta || ""),
+                    card_pin: String(order.name || "").replace(/^PIN\s+/i, ""),
+                    payment_method: String(order.pics_text || ""),
+                    payment_other: "",
+                    card_price: price,
+                    spent: 0,
+                    remaining: price,
+                    linked_boxes: [],
+                    notes: String(order.note || ""),
+                  },
+                  known.get(id),
+                );
               })
               .filter((card: GiftCard) => card.card_number),
           ),
@@ -1182,6 +1211,7 @@ const Index: React.FC = () => {
             onRefresh={fetchGiftCards}
             orders={allOrders.filter((o) => o.sheet_name === viewingMonth)}
             viewingMonth={viewingMonth}
+            backendIsLegacy={giftCardsBackendIsLegacy}
           />
         );
       case "calculator":
