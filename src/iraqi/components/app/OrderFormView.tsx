@@ -5,6 +5,7 @@ import {
   getDisplayPrice,
   getSheetPriceForSave,
   isOrderFree,
+  isSameCustomer,
   uploadToImgBB,
   fileToBase64,
 } from "@/iraqi/lib/order-utils";
@@ -65,37 +66,6 @@ const normalizePhoneDigits = (value: unknown) =>
       return digits.replace(/^0+/, "");
     })
     .filter(Boolean);
-
-const parseOrderTime = (value: unknown) => {
-  const raw = String(value || "").trim();
-  if (!raw || raw === "Unknown Date") return null;
-
-  const localMatch = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
-  );
-  if (localMatch) {
-    const [, day, month, year, hour = "0", minute = "0", second = "0"] = localMatch;
-    const time = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second),
-    ).getTime();
-    return Number.isNaN(time) ? null : time;
-  }
-
-  const time = new Date(raw).getTime();
-  return Number.isNaN(time) ? null : time;
-};
-
-const isWithinAutoLinkWindow = (aDate: unknown, bDate: unknown) => {
-  const aTime = parseOrderTime(aDate);
-  const bTime = parseOrderTime(bDate);
-  if (aTime === null || bTime === null) return false;
-  return Math.abs(aTime - bTime) <= 3 * 24 * 60 * 60 * 1000;
-};
 
 const OrderFormView: React.FC<OrderFormViewProps> = ({
   activeSheet,
@@ -670,14 +640,13 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
   };
 
   const currentPhoneDigits = normalizePhoneDigits(formData.phone);
+  // An informational badge only, shown next to a manually-found search result -
+  // not a basis for pre-selecting or pre-sorting anything.
   const isSamePhoneOrder = (order: Order) => {
     if (currentPhoneDigits.length === 0) return false;
     const orderPhones = normalizePhoneDigits(order.phone);
     return orderPhones.some((phone) => currentPhoneDigits.includes(phone));
   };
-  const currentOrderDate = isEditing ? editingOrder?.date : new Date();
-  const isAutoSuggestedLink = (order: Order) =>
-    isSamePhoneOrder(order) && isWithinAutoLinkWindow(currentOrderDate, order.date);
   const linkSheet = String(isEditing ? formData.sheet_name : activeSheet);
   const linkedKeySet = new Set(
     linkedIds.map((id) => {
@@ -686,21 +655,25 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
     }),
   );
 
+  // No default list, no auto-suggested match, no pre-sorting by phone or date -
+  // this used to show up to 15 orders (any orders, unrelated ones included, once
+  // the phone field was blank) before a single character was typed, which is how
+  // orders that shared nothing ended up linked together. A link can now only be
+  // made by actively typing a search and picking the exact result.
   const linkableOrders = allOrders
     .filter((o) => {
       if (editingOrder && o.id === editingOrder.id && o.sheet_name === editingOrder.sheet_name)
         return false;
       const key = `${o.id}:${o.sheet_name}`;
       if (linkedKeySet.has(key)) return false;
-      const q = linkSearch.toLowerCase();
-      if (!q) return currentPhoneDigits.length > 0 ? isAutoSuggestedLink(o) : true;
+      const q = linkSearch.toLowerCase().trim();
+      if (!q) return false;
       return [o.insta, o.name, o.phone, o.orderNo].some((f) =>
         String(f || "")
           .toLowerCase()
           .includes(q),
       );
     })
-    .sort((a, b) => Number(isAutoSuggestedLink(b)) - Number(isAutoSuggestedLink(a)))
     .slice(0, 15);
 
   const linkedOrders = allOrders.filter((o) => {
@@ -1223,6 +1196,22 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
                     key={`${o.id}-${o.sheet_name}`}
                     type="button"
                     onClick={() => {
+                      // The same guard OrderListView's bulk-link action already
+                      // enforces: same phone or Instagram, within 7 days. This
+                      // picker had no check of its own at all - typing a search
+                      // and picking any result could link two orders that share
+                      // nothing, which is how mismatched groups kept forming.
+                      const currentOrderContext = {
+                        ...formData,
+                        date: isEditing ? editingOrder?.date || "" : new Date().toISOString(),
+                      } as Order;
+                      if (!isSameCustomer(currentOrderContext, o)) {
+                        alert(
+                          "This order can't be linked: it needs to share the same phone number " +
+                            "or Instagram, and be within 7 days.",
+                        );
+                        return;
+                      }
                       linkSelectionTouchedRef.current = true;
                       setLinkedIds((p) => [...p, `${o.id}:${o.sheet_name}`]);
                       setShowLinkModal(false);
