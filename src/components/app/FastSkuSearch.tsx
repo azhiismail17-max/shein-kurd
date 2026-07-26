@@ -7,6 +7,7 @@ import {
   normalizeLink,
   scoreOrderAgainstProduct,
 } from "@/lib/sku-match";
+import { lookupSku, toPinCode } from "@/lib/sku-lookup";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -18,12 +19,12 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { SkuBarcodeScanner } from "./SkuBarcodeScanner";
 import { preloadSkuLabelReader } from "./skuOcrWorker";
 
-const SKU_API_URL =
-  "https://script.google.com/macros/s/AKfycbxUmtYopoO9HznjbfiAP8heZTZlk0RvxtuInPzlEuneNXs4RGAlDvY_FjUAqK8yyT8/exec";
+// Codes are stored as a 6-7 digit tail, so the field behaves like a PIN pad.
+const PIN_MIN_DIGITS = 6;
+const PIN_MAX_DIGITS = 7;
 const skuSearchCache = new Map<string, ApiResult[]>();
 
 export interface SkuSearchOrder {
@@ -72,17 +73,6 @@ interface PreparedOrder<T extends SkuSearchOrder> {
   link: string;
   productKey: string;
 }
-
-const getApiQueries = (value: string) => {
-  const identifiers = extractIdentifiers(value).sort((a, b) => {
-    const aIsProductSku = /^s[a-z]\d/i.test(a);
-    const bIsProductSku = /^s[a-z]\d/i.test(b);
-    if (aIsProductSku !== bIsProductSku) return aIsProductSku ? -1 : 1;
-    return b.length - a.length;
-  });
-  if (identifiers.length > 0) return identifiers.slice(0, 3);
-  return [normalize(value)].filter((query) => query.length >= 2);
-};
 
 const dedupeApiResults = (results: ApiResult[]) => {
   const seen = new Set<string>();
@@ -307,7 +297,7 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
         if (scannedValue.length >= 6 && scanDuration <= 2500) {
           event.preventDefault();
           setLastHardwareScan(scannedValue);
-          setSkuQuery(scannedValue);
+          setSkuQuery(toPinCode(scannedValue, PIN_MAX_DIGITS));
           setApiResults([]);
           window.requestAnimationFrame(() => inputRef.current?.focus());
         }
@@ -332,77 +322,48 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
     abortRef.current?.abort();
     const requestNumber = ++requestNumberRef.current;
 
-    if (!isOpen || skuQuery.trim().length < 2) {
+    // The code is a 6-7 digit PIN, so there is nothing worth asking about until
+    // all of it is there. Searching from the second character used to fire a
+    // separate request for every keystroke - five slow lookups to type one
+    // code - and only the last one could ever be the right answer.
+    if (!isOpen || skuQuery.length < 6) {
       setApiResults([]);
       setIsSearching(false);
       return;
     }
 
-    const queries = getApiQueries(skuQuery);
-    if (queries.length === 0) {
-      setApiResults([]);
+    const cached = skuSearchCache.get(skuQuery);
+    if (cached) {
+      // Re-typing or backspacing to a code already looked up is instant.
+      setApiResults(dedupeApiResults(cached));
       setIsSearching(false);
       return;
     }
 
     setApiResults([]);
-    const hasScannedCode = queries.some((query) => query.length >= 7 && /^[a-z]*\d+$/i.test(query));
-    timeoutRef.current = setTimeout(
-      async () => {
-        const cachedResults = queries.flatMap((query) => skuSearchCache.get(query) || []);
-        const missingQueries = queries.filter((query) => !skuSearchCache.has(query));
+    timeoutRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const abortTimer = window.setTimeout(() => controller.abort(), 15000);
+      setIsSearching(true);
 
-        if (missingQueries.length === 0) {
-          if (requestNumber === requestNumberRef.current)
-            setApiResults(dedupeApiResults(cachedResults));
-          return;
+      try {
+        const { results } = await lookupSku(skuQuery, controller.signal);
+        skuSearchCache.set(skuQuery, results);
+        if (skuSearchCache.size > 100) {
+          const firstKey = skuSearchCache.keys().next().value;
+          if (firstKey) skuSearchCache.delete(firstKey);
         }
-
-        const controller = new AbortController();
-        abortRef.current = controller;
-        const abortTimer = window.setTimeout(() => controller.abort(), 15000);
-        setIsSearching(true);
-
-        try {
-          const fetched = await Promise.all(
-            missingQueries.map(async (query) => {
-              const url = `${SKU_API_URL}?query=${encodeURIComponent(query)}`;
-              const response = await fetchWithRetry(
-                url,
-                { method: "GET", signal: controller.signal },
-                1,
-              );
-              const text = await response.text();
-              let data: { status?: string; results?: ApiResult[] } | null = null;
-              try {
-                data = JSON.parse(text);
-              } catch {
-                console.warn("Invalid SKU search response:", text.substring(0, 80));
-              }
-              const results =
-                data?.status === "success" && Array.isArray(data.results) ? data.results : [];
-              skuSearchCache.set(query, results);
-              return results;
-            }),
-          );
-
-          if (skuSearchCache.size > 100) {
-            const firstKey = skuSearchCache.keys().next().value;
-            if (firstKey) skuSearchCache.delete(firstKey);
-          }
-
-          if (requestNumber === requestNumberRef.current) {
-            setApiResults(dedupeApiResults([...cachedResults, ...fetched.flat()]));
-          }
-        } catch (error) {
-          if (!controller.signal.aborted) console.error("SKU Search error", error);
-        } finally {
-          window.clearTimeout(abortTimer);
-          if (requestNumber === requestNumberRef.current) setIsSearching(false);
+        if (requestNumber === requestNumberRef.current) {
+          setApiResults(dedupeApiResults(results));
         }
-      },
-      hasScannedCode ? 90 : 120,
-    );
+      } catch (error) {
+        if (!controller.signal.aborted) console.error("SKU Search error", error);
+      } finally {
+        window.clearTimeout(abortTimer);
+        if (requestNumber === requestNumberRef.current) setIsSearching(false);
+      }
+    }, 60);
 
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -410,7 +371,7 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
   }, [skuQuery, isOpen]);
 
   const handleScannedText = (value: string) => {
-    setSkuQuery(value.trim());
+    setSkuQuery(toPinCode(value, PIN_MAX_DIGITS));
     setIsScannerOpen(false);
     window.requestAnimationFrame(() => inputRef.current?.focus());
   };
@@ -482,15 +443,20 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
               <input
                 ref={inputRef}
                 type="text"
-                placeholder={
-                  selectedBox
-                    ? `Search inside Box ${selectedBox.replace(/^box[\s-]*/i, "")}`
-                    : "Search SKU, link, barcode, or name…"
-                }
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={PIN_MAX_DIGITS}
+                placeholder="000000"
                 value={skuQuery}
-                onChange={(event) => setSkuQuery(event.target.value)}
-                className="w-full rounded-lg border border-border bg-secondary py-2.5 pl-10 pr-20 text-foreground transition-colors focus:border-primary/50 focus:outline-none"
+                // Digits only, never longer than the stored code. Pasting or
+                // scanning a full label keeps its last 7 digits, which is the
+                // exact form the codes are saved in.
+                onChange={(event) => setSkuQuery(toPinCode(event.target.value, PIN_MAX_DIGITS))}
+                className="w-full rounded-lg border border-border bg-secondary py-2.5 pl-10 pr-20 text-center font-mono text-lg font-bold tracking-[0.35em] text-foreground transition-colors placeholder:font-normal placeholder:tracking-[0.35em] placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none"
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Product code, 6 or 7 digits"
               />
               <div className="absolute right-2 flex items-center gap-1">
                 {isSearching && <Loader2 size={15} className="animate-spin text-primary" />}
@@ -525,7 +491,18 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
                 <Keyboard size={13} className="shrink-0" />
                 <span className="truncate">Bluetooth / USB laser ready</span>
               </span>
-              {lastHardwareScan && <span className="shrink-0">Scan received</span>}
+              {/* Nothing is sent until the code is complete, so say how far along it is. */}
+              <span className="shrink-0 tabular-nums">
+                {lastHardwareScan
+                  ? "Scan received"
+                  : skuQuery.length === 0
+                    ? `${PIN_MIN_DIGITS}-${PIN_MAX_DIGITS} digits`
+                    : skuQuery.length < PIN_MIN_DIGITS
+                      ? `${PIN_MIN_DIGITS - skuQuery.length} more digit${
+                          PIN_MIN_DIGITS - skuQuery.length === 1 ? "" : "s"
+                        }`
+                      : `${skuQuery.length} digits`}
+              </span>
             </div>
 
             <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-0.5">
@@ -621,18 +598,25 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
                 );
               })}
 
-              {skuQuery.trim() &&
+              {skuQuery.length >= PIN_MIN_DIGITS &&
                 localMatches.length === 0 &&
                 visibleApiResults.length === 0 &&
                 !isSearching && (
                   <div className="px-2 py-7 text-center text-sm text-muted-foreground">
-                    No matching SKU, barcode, or link found.
+                    No product found for {skuQuery}.
                   </div>
                 )}
 
-              {!skuQuery.trim() && (
+              {skuQuery.length > 0 && skuQuery.length < PIN_MIN_DIGITS && (
                 <div className="px-2 py-7 text-center text-sm text-muted-foreground opacity-75">
-                  Type a SKU or tap the camera to scan the whole product label.
+                  Keep typing - a product code is {PIN_MIN_DIGITS} or {PIN_MAX_DIGITS} digits.
+                </div>
+              )}
+
+              {skuQuery.length === 0 && (
+                <div className="px-2 py-7 text-center text-sm text-muted-foreground opacity-75">
+                  Type the {PIN_MIN_DIGITS}-{PIN_MAX_DIGITS} digit code, scan with the laser, or tap
+                  the camera.
                 </div>
               )}
             </div>
