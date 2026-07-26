@@ -9,10 +9,11 @@ interface SkuNumberScannerProps {
   maxDigits?: number;
 }
 
-// The frame handed to OCR. Recognition time scales with pixel count, so the crop
-// is deliberately small - large enough for printed digits to stay legible, small
-// enough to come back quickly on a phone.
-const OCR_TARGET_WIDTH = 620;
+// The frame handed to OCR. Recognition time scales with pixel count, but the
+// product line is over twenty digits of small print, and squeezing that into a
+// narrow canvas turns the digits to mush. A wide, short band keeps the total
+// pixel count low while leaving each digit big enough to recognise.
+const OCR_TARGET_WIDTH = 980;
 // Gap between reads. The read itself takes longer than this, so it only controls
 // how soon the next one starts after a miss.
 const SCAN_INTERVAL_MS = 90;
@@ -22,9 +23,10 @@ const SCAN_INTERVAL_MS = 90;
 const TRUSTED_CONFIDENCE = 70;
 
 // The guide box, as a fraction of the video. Everything outside it is discarded
-// before OCR, which is both faster and stops prices and dates elsewhere on the
-// label from being read instead of the product number.
-const GUIDE = { x: 0.06, y: 0.3, width: 0.88, height: 0.4 };
+// before OCR, which is both faster and keeps the barcode, the Chinese text and
+// the "Made in China" line from being read instead of the code. Shaped as a wide
+// band so the two printed code lines fill it when the label is squared up.
+const GUIDE = { x: 0.04, y: 0.34, width: 0.92, height: 0.32 };
 
 const buildOcrCanvas = (
   source: CanvasImageSource,
