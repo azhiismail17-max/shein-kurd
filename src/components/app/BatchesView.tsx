@@ -192,6 +192,42 @@ const getSavedBoxLinkMedia = (link?: BoxLink) => {
   };
 };
 
+// A saved Total Link used to live only in React state, so it was gone on the
+// next reload - which also meant the panel could never tell that a link had
+// been saved, and kept reopening as an editable box. Keeping it here means a
+// saved link stays saved and stays copy-only, whatever the sheet answers.
+const LOCAL_BOX_LINKS_KEY = "kurdistani_box_links_cache";
+
+const readLocalBoxLinks = (): BoxLink[] => {
+  try {
+    const links = JSON.parse(localStorage.getItem(LOCAL_BOX_LINKS_KEY) || "[]");
+    return Array.isArray(links) ? links : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalBoxLink = (link: BoxLink) => {
+  const links = readLocalBoxLinks().filter(
+    (saved) => !(saved.sheet_name === link.sheet_name && saved.box_name === link.box_name),
+  );
+  localStorage.setItem(LOCAL_BOX_LINKS_KEY, JSON.stringify([link, ...links]));
+};
+
+// The sheet is the shared truth, so its copy of a box wins. A box the sheet has
+// never heard of still shows what this device saved, instead of reverting to an
+// empty editable field.
+const mergeBoxLinks = (serverLinks: BoxLink[]): BoxLink[] => {
+  const merged = [...serverLinks];
+  for (const local of readLocalBoxLinks()) {
+    const exists = merged.some(
+      (link) => link.sheet_name === local.sheet_name && link.box_name === local.box_name,
+    );
+    if (!exists) merged.push(local);
+  }
+  return merged;
+};
+
 const getOtherBoxLinkTargets = (role?: string): string[] => {
   const rolePrefix = String(role || "")
     .trim()
@@ -257,12 +293,11 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   // default - editing it back to a plain input requires pressing "Edit"
   // first, so it can't be overwritten by an accidental keystroke.
   const [editingLinkBox, setEditingLinkBox] = useState<string | null>(null);
-  const [boxLinks, setBoxLinks] = useState<BoxLink[]>([]);
+  const [boxLinks, setBoxLinks] = useState<BoxLink[]>(() => readLocalBoxLinks());
   const [boxLinkInputs, setBoxLinkInputs] = useState<
     Record<string, { total_link: string; pictures: string[]; warnings: string[] }>
   >({});
   const [uploadingBoxImage, setUploadingBoxImage] = useState<string | null>(null);
-  const [savingBoxLink, setSavingBoxLink] = useState<string | null>(null);
   const [linkingGiftCardBox, setLinkingGiftCardBox] = useState<string | null>(null);
   const [showMuhamadCalculator, setShowMuhamadCalculator] = useState(false);
   const [muhamadSelectedBoxes, setMuhamadSelectedBoxes] = useState<Set<string>>(new Set());
@@ -363,7 +398,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       const text = await res.text();
       const json = JSON.parse(text);
       if (json?.status === "success" && Array.isArray(json.box_links)) {
-        setBoxLinks(json.box_links);
+        setBoxLinks(mergeBoxLinks(json.box_links));
       }
     } catch (e) {
       console.warn("Box links fetch failed", e);
@@ -677,7 +712,59 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         (warning) => !savedWarningSet.has(warning),
       ).length;
       const actor = localStorage.getItem("auth_username") || role || "admin";
-      setSavingBoxLink(key);
+
+      // Google Apps Script takes several seconds to answer a write, and asking
+      // it to read the links straight back doubled that. Waiting for either one
+      // before showing anything is what made saving feel like it hung for
+      // fifteen seconds. The link is recorded here first, so the panel closes
+      // and the link locks to copy-only immediately, and the sheet is brought
+      // up to date in the background.
+      const optimisticLink: BoxLink = {
+        ...(savedBoxLink || {}),
+        id: savedBoxLink?.id || `local-${key}`,
+        sheet_name: sheetName,
+        box_name: box.box_name,
+        total_link: nextTotalLink,
+        pictures: draft.pictures,
+        warnings: draft.warnings,
+        image_url: serializeBoxLinkMedia({ pictures: draft.pictures, warnings: draft.warnings }),
+        updated_at: new Date().toLocaleString("en-GB"),
+        updated_by: actor,
+        updated_role: role || "",
+      };
+      writeLocalBoxLink(optimisticLink);
+      setBoxLinks((prev) => [
+        optimisticLink,
+        ...prev.filter(
+          (link) => !(link.sheet_name === sheetName && link.box_name === box.box_name),
+        ),
+      ]);
+      setEditingLinkBox(null);
+      setOpenBoxLinkBox(null);
+      toast.success(`Saved for ${box.box_name}`);
+
+      const notificationTargets = getOtherBoxLinkTargets(role);
+      if (totalLinkWasAddedOrChanged) {
+        sendNotification(
+          "link",
+          `Total Link added for ${box.box_name} by ${actor}.`,
+          role,
+          undefined,
+          false,
+          notificationTargets,
+        ).catch((error) => console.error("Total link notification failed", error));
+      }
+      if (newWarningCount > 0) {
+        sendNotification(
+          "warning",
+          `${newWarningCount} Warning picture${newWarningCount === 1 ? "" : "s"} added for ${box.box_name} by ${actor}.`,
+          role,
+          undefined,
+          true,
+          notificationTargets,
+        ).catch((error) => console.error("Warning picture notification failed", error));
+      }
+
       try {
         const res = await fetchWithRetry(SCRIPT_URL, {
           method: "POST",
@@ -696,47 +783,17 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
             updated_by: localStorage.getItem("auth_username") || role || "",
           }),
         });
-        const text = await res.text();
-        const json = JSON.parse(text);
+        const json = JSON.parse(await res.text());
         if (json?.status !== "success") throw new Error(json?.message || "Could not save box link");
-        if (Array.isArray(json.box_links)) setBoxLinks(json.box_links);
-        else await refreshBoxLinks();
-        toast.success(`Saved for ${box.box_name}`);
-        // The box link itself is already saved at this point - close the
-        // panel and clear the saving state right away instead of making the
-        // user stare at a spinner through the notification round-trip
-        // (add_notification, then the phone-push pipeline). Notifications
-        // still send, just in the background, not on the critical path.
-        setOpenBoxLinkBox(null);
-        const notificationTargets = getOtherBoxLinkTargets(role);
-        if (totalLinkWasAddedOrChanged) {
-          sendNotification(
-            "link",
-            `Total Link added for ${box.box_name} by ${actor}.`,
-            role,
-            undefined,
-            false,
-            notificationTargets,
-          ).catch((error) => console.error("Total link notification failed", error));
-        }
-        if (newWarningCount > 0) {
-          sendNotification(
-            "warning",
-            `${newWarningCount} Warning picture${newWarningCount === 1 ? "" : "s"} added for ${box.box_name} by ${actor}.`,
-            role,
-            undefined,
-            true,
-            notificationTargets,
-          ).catch((error) => console.error("Warning picture notification failed", error));
-        }
+        if (Array.isArray(json.box_links)) setBoxLinks(mergeBoxLinks(json.box_links));
       } catch (e) {
+        // The link is already kept on this device, so it is never lost here -
+        // only the sharing with other devices has to wait.
         console.error(e);
-        alert(e instanceof Error ? e.message : "Failed to save box link");
-      } finally {
-        setSavingBoxLink(null);
+        toast.warning(`${box.box_name} is saved here, still syncing to the Google Sheet.`);
       }
     },
-    [boxLinkInputs, canManageBoxLinks, getBoxLinkForBox, getBoxSheetName, refreshBoxLinks, role],
+    [boxLinkInputs, canManageBoxLinks, getBoxLinkForBox, getBoxSheetName, role],
   );
 
   const copyBoxTotalLink = useCallback((link: string) => {
@@ -2405,15 +2462,11 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                       <button
                         type="button"
                         onClick={() => handleSaveBoxLink(box)}
-                        disabled={savingBoxLink === boxLinkKey || isUploadingBoxMedia}
+                        disabled={isUploadingBoxMedia}
                         className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-emerald-600 disabled:opacity-50"
                       >
-                        {savingBoxLink === boxLinkKey ? (
-                          <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        ) : (
-                          <Check size={14} />
-                        )}
-                        {savingBoxLink === boxLinkKey ? "Saving..." : "Save"}
+                        <Check size={14} />
+                        Save
                       </button>
                     </div>
                   </div>
