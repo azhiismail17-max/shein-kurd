@@ -72,7 +72,10 @@ export async function queueOrderForSkuExtraction(entry: SkuQueueEntry): Promise<
       body: JSON.stringify({
         name,
         link,
-        pcs: String(entry.pcs ?? "").trim() || "1",
+        // pcs is an integer column, so it is sent as a number. A blank or
+        // non-numeric piece count would otherwise be rejected outright and the
+        // order would never reach the bot's queue.
+        pcs: Number.parseInt(String(entry.pcs ?? ""), 10) || 1,
         // Explicitly null: this is the flag sku.py filters on to find work.
         sku: null,
       }),
