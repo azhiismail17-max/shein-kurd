@@ -9,6 +9,7 @@ import {
   fileToBase64,
 } from "@/lib/order-utils";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { queueOrderForSkuExtraction } from "@/lib/sku-queue";
 import { recordOrderCreated, resolveTeamUsername } from "@/lib/teamActivity";
 import { ChevronLeft, Upload, X, Sparkles, Link2, Eye } from "lucide-react";
 
@@ -617,6 +618,17 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
           if (result?.status === "success") {
             const rowMatch = String(result.message || "").match(/Row (\d+)/);
             const realRowId = rowMatch ? Number(rowMatch[1]) : undefined;
+
+            // Hand the link to the SKU extractor bot as a pending row. The sheet
+            // above stays the record of the order itself; this only exists so the
+            // product code gets filled in automatically. Deliberately not awaited
+            // and never allowed to throw - the order is already saved.
+            queueOrderForSkuExtraction({
+              name: String(payload.insta || payload.name || "").trim(),
+              link: String(payload.link || ""),
+              pcs: payload.pics_text,
+              requestId: payload.client_request_id,
+            }).catch((error) => console.warn("SKU queue failed", error));
 
             try {
               await recordOrderCreated("kurdistani", currentUser, currentRole, {
