@@ -369,7 +369,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+            <div
+              className={`flex items-center gap-0.5 sm:gap-1 shrink-0 ${isAdmin ? "order-first" : ""}`}
+            >
               {isSearchingAll && (
                 <div className="hidden sm:flex flex items-center gap-2 text-xs text-primary font-medium mr-2">
                   <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
