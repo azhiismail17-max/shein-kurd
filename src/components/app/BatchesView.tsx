@@ -1754,13 +1754,18 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   return (
     <div ref={viewRef} className="space-y-4 animate-slide-up">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Boxes</h1>
+        <div className="flex items-center justify-between gap-2 sm:justify-start">
+          <div>
+            <h1 className="text-2xl font-bold">Boxes</h1>
+            {canUseBoxTools && (
+              <p className="text-sm text-muted-foreground">
+                {stats.total} active boxes • {stats.totalPieces} items •{" "}
+                {(stats.totalValue / 1000).toFixed(0)}K IQD
+              </p>
+            )}
+          </div>
           {canUseBoxTools && (
-            <p className="text-sm text-muted-foreground">
-              {stats.total} active boxes • {stats.totalPieces} items •{" "}
-              {(stats.totalValue / 1000).toFixed(0)}K IQD
-            </p>
+            <SkuSearch orders={allOrders} onFound={onOrderClick} boxOptions={skuBoxOptions} />
           )}
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
@@ -1822,9 +1827,6 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
             >
               <Truck size={12} /> Delivery
             </button>
-          )}
-          {canUseBoxTools && (
-            <SkuSearch orders={allOrders} onFound={onOrderClick} boxOptions={skuBoxOptions} />
           )}
           {canUseBoxTools && (
             <button
