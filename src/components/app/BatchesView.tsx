@@ -377,6 +377,10 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   const [muhamadSelectedBoxes, setMuhamadSelectedBoxes] = useState<Set<string>>(new Set());
   const [showDeliveryCalculator, setShowDeliveryCalculator] = useState(false);
   const [expandedDeliveryBox, setExpandedDeliveryBox] = useState<string | null>(null);
+  // Same month as the rest of the Boxes tab (the "boxes" list below already
+  // covers only viewingMonth) - what's picked here is which of those boxes
+  // count toward the Delivery totals, same as the Blue Line box picker.
+  const [deliverySelectedBoxes, setDeliverySelectedBoxes] = useState<Set<string>>(new Set());
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
   const [verifiedOrders, setVerifiedOrders] = useState<Set<string>>(getVerifiedSet);
   const [missingOrders, setMissingOrders] = useState<Set<string>>(getMissingSet);
@@ -948,14 +952,6 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   }, [blueLineMainPrice, blueLineTotals, selectedMuhamadBoxes]);
 
   const deliveryReport = useMemo(() => {
-    const regionOrderCounts: Record<DeliveryPlaceCategory, number> = {
-      Erbil: 0,
-      "Outside Erbil": 0,
-      Sulaymani: 0,
-      Duhok: 0,
-      Kirkuk: 0,
-      "Outside Kurdistan": 0,
-    };
     const perBox = boxes.map((box) => {
       const boxCategoryTotals = makeEmptyCategoryTotals();
       let boxTotal = 0;
@@ -970,18 +966,36 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         boxTotal += onHead;
         boxOtherTotal += effectiveOtherPrice;
         const category = getDeliveryPlaceCategory(order.place);
-        if (category) {
-          boxCategoryTotals[category] += onHead;
-          regionOrderCounts[category] += 1;
-        }
+        if (category) boxCategoryTotals[category] += onHead;
         return { order, onHead, otherPrice, free, category };
       });
       return { box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows };
     });
-    const grandTotal = perBox.reduce((sum, entry) => sum + entry.boxTotal, 0);
-    const grandOtherTotal = perBox.reduce((sum, entry) => sum + entry.boxOtherTotal, 0);
-    return { regionOrderCounts, perBox, grandTotal, grandOtherTotal };
-  }, [boxes, allOrders]);
+
+    // Only the boxes checked in the picker feed the summary at the top -
+    // every box still gets a row (and can still be expanded) so its own
+    // numbers are there to look up, same as the Blue Line list.
+    const regionOrderCounts: Record<DeliveryPlaceCategory, number> = {
+      Erbil: 0,
+      "Outside Erbil": 0,
+      Sulaymani: 0,
+      Duhok: 0,
+      Kirkuk: 0,
+      "Outside Kurdistan": 0,
+    };
+    let grandTotal = 0;
+    let grandOtherTotal = 0;
+    perBox.forEach((entry) => {
+      if (!deliverySelectedBoxes.has(entry.box.box_name)) return;
+      grandTotal += entry.boxTotal;
+      grandOtherTotal += entry.boxOtherTotal;
+      entry.orderRows.forEach(({ category }) => {
+        if (category) regionOrderCounts[category] += 1;
+      });
+    });
+
+    return { perBox, regionOrderCounts, grandTotal, grandOtherTotal };
+  }, [boxes, allOrders, deliverySelectedBoxes]);
 
   const handleToggleMuhamadCalculator = useCallback(() => {
     if (!showMuhamadCalculator) {
@@ -1753,11 +1767,11 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           <div ref={monthPickerRef} className="relative min-w-0">
             <button
               onClick={() => setShowMonthPicker((p) => !p)}
-              className="flex w-full items-center justify-center gap-1.5 bg-secondary text-foreground px-3 py-2 rounded-full text-sm font-semibold hover:bg-secondary/80 transition-all border border-border sm:w-auto"
+              className="flex w-full items-center justify-center gap-1 bg-secondary text-foreground px-2 py-1.5 rounded-full text-xs font-semibold hover:bg-secondary/80 transition-all border border-border sm:w-auto"
             >
-              <Calendar size={14} /> {viewingMonth || activeYear}
+              <Calendar size={12} /> {viewingMonth || activeYear}
               <ChevronDown
-                size={12}
+                size={10}
                 className={`transition-transform ${showMonthPicker ? "rotate-180" : ""}`}
               />
             </button>
@@ -1804,9 +1818,9 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           {canUseBoxTools && (
             <button
               onClick={() => setShowDeliveryCalculator((p) => !p)}
-              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-sm font-semibold transition-all border ${showDeliveryCalculator ? "bg-blue-500 text-white border-blue-500 shadow-sm" : "bg-secondary text-foreground border-border hover:bg-secondary/80"}`}
+              className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-full text-xs font-semibold transition-all border ${showDeliveryCalculator ? "bg-blue-500 text-white border-blue-500 shadow-sm" : "bg-secondary text-foreground border-border hover:bg-secondary/80"}`}
             >
-              <Truck size={14} /> Delivery
+              <Truck size={12} /> Delivery
             </button>
           )}
           {canUseBoxTools && (
@@ -1815,18 +1829,18 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           {canUseBoxTools && (
             <button
               onClick={() => setCreatingBox(true)}
-              className="flex items-center justify-center gap-1.5 bg-primary text-primary-foreground px-4 py-2 rounded-full text-sm font-semibold hover:bg-primary/90 transition-all glow-primary"
+              className="flex items-center justify-center gap-1 bg-primary text-primary-foreground px-2.5 py-1.5 rounded-full text-xs font-semibold hover:bg-primary/90 transition-all glow-primary"
             >
-              <Plus size={14} /> New Box
+              <Plus size={12} /> New Box
             </button>
           )}
           {canUseBoxTools && unbatchedOrders.length > 0 && (
             <button
               onClick={handleAutoBox}
               disabled={isSyncing}
-              className="flex items-center justify-center gap-1.5 bg-accent text-accent-foreground px-3 py-2 rounded-full text-sm font-semibold hover:bg-accent/90 transition-all disabled:opacity-50"
+              className="flex items-center justify-center gap-1 bg-accent text-accent-foreground px-2 py-1.5 rounded-full text-xs font-semibold hover:bg-accent/90 transition-all disabled:opacity-50"
             >
-              <PackagePlus size={14} /> Auto ({unbatchedOrders.length})
+              <PackagePlus size={12} /> Auto ({unbatchedOrders.length})
             </button>
           )}
         </div>
@@ -1968,7 +1982,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                   {deliveryReport.grandTotal.toLocaleString()} IQD
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  To collect across {boxes.length} box{boxes.length === 1 ? "" : "es"}
+                  {deliverySelectedBoxes.size} of {deliveryReport.perBox.length} boxes selected
                 </div>
               </div>
               <div>
@@ -1995,44 +2009,79 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
             </div>
           </div>
 
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() =>
+                setDeliverySelectedBoxes(new Set(deliveryReport.perBox.map((entry) => entry.box.box_name)))
+              }
+              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold hover:bg-secondary/80"
+            >
+              All
+            </button>
+            <button
+              onClick={() => setDeliverySelectedBoxes(new Set())}
+              className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold hover:bg-secondary/80"
+            >
+              Clear
+            </button>
+          </div>
+
           <div className="mt-3 max-h-96 space-y-1.5 overflow-auto custom-scrollbar">
             {deliveryReport.perBox.map(({ box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows }) => {
               const displayName = box.box_name.replace(/^box[\s-]*/i, "").trim() || box.box_name;
               const isExpanded = expandedDeliveryBox === box.box_name;
+              const isSelected = deliverySelectedBoxes.has(box.box_name);
               return (
                 <div key={box.box_name} className="rounded-lg border border-border bg-secondary/40">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedDeliveryBox((current) =>
-                        current === box.box_name ? null : box.box_name,
-                      )
-                    }
-                    className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left"
-                  >
-                    <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold">
-                      {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      Box {displayName}
-                    </span>
-                    <span className="flex flex-wrap items-center justify-end gap-1">
-                      {DELIVERY_PLACE_CATEGORIES.filter((c) => boxCategoryTotals[c] > 0).map((c) => (
-                        <span
-                          key={c}
-                          className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
-                        >
-                          {c}: {boxCategoryTotals[c].toLocaleString()}
-                        </span>
-                      ))}
-                      <span className="text-right leading-tight">
-                        <span className="block rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                          {boxTotal.toLocaleString()}
-                        </span>
-                        <span className="mt-0.5 block text-[9px] font-semibold text-muted-foreground">
-                          {boxOtherTotal.toLocaleString()}
+                  <div className="flex items-center gap-2 px-2.5 py-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDeliverySelectedBoxes((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(box.box_name)) next.delete(box.box_name);
+                          else next.add(box.box_name);
+                          return next;
+                        })
+                      }
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all ${isSelected ? "border-blue-500 bg-blue-500 text-white" : "border-border bg-card hover:border-blue-500/50"}`}
+                      aria-label={`${isSelected ? "Remove" : "Add"} Box ${displayName} from Delivery totals`}
+                    >
+                      {isSelected && <Check size={10} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedDeliveryBox((current) =>
+                          current === box.box_name ? null : box.box_name,
+                        )
+                      }
+                      className="flex flex-1 items-center justify-between gap-2 text-left"
+                    >
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold">
+                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        Box {displayName}
+                      </span>
+                      <span className="flex flex-wrap items-center justify-end gap-1">
+                        {DELIVERY_PLACE_CATEGORIES.filter((c) => boxCategoryTotals[c] > 0).map((c) => (
+                          <span
+                            key={c}
+                            className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+                          >
+                            {c}: {boxCategoryTotals[c].toLocaleString()}
+                          </span>
+                        ))}
+                        <span className="text-right leading-tight">
+                          <span className="block rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                            {boxTotal.toLocaleString()}
+                          </span>
+                          <span className="mt-0.5 block text-[9px] font-semibold text-muted-foreground">
+                            {boxOtherTotal.toLocaleString()}
+                          </span>
                         </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                   {isExpanded && (
                     <div className="space-y-1 border-t border-border px-2.5 py-1.5">
                       {orderRows.map(({ order, onHead, otherPrice, free, category }) => (
