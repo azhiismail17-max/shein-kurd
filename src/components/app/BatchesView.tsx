@@ -40,6 +40,7 @@ import {
   CheckCircle2,
   Calculator,
   CreditCard,
+  Truck,
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
 import {
@@ -47,6 +48,9 @@ import {
   getDisplayPrice,
   getLinkedGroup,
   uploadToImgBB,
+  getCustomerTotalPrice,
+  isOrderFree,
+  getRegionShipping,
 } from "@/lib/order-utils";
 import { toast } from "sonner";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -100,6 +104,64 @@ const LOCAL_GIFT_CARD_RATES_KEY = "kurdistani_gift_card_iqd_rates";
 const DEFAULT_IQD_RATES = { Zaincash: 401865, "Qi card": 419250 };
 
 const isDirectProfitBox = (boxName: string) => /\d+\s*d\b/i.test(boxName);
+
+const DELIVERY_PLACE_CATEGORIES = [
+  "Erbil",
+  "Outside Erbil",
+  "Sulaymani",
+  "Duhok",
+  "Kirkuk",
+  "Outside Kurdistan",
+] as const;
+type DeliveryPlaceCategory = (typeof DELIVERY_PLACE_CATEGORIES)[number];
+
+const makeEmptyCategoryTotals = (): Record<DeliveryPlaceCategory, number> => ({
+  Erbil: 0,
+  "Outside Erbil": 0,
+  Sulaymani: 0,
+  Duhok: 0,
+  Kirkuk: 0,
+  "Outside Kurdistan": 0,
+});
+
+// Zaxo and Halabja share the same 5,000 shipping tier as the generic "Outside
+// Erbil" option but aren't one of the six totals asked for, so they fold into
+// Outside Erbil rather than being dropped from the report.
+const getDeliveryPlaceCategory = (
+  place: string | undefined | null,
+): DeliveryPlaceCategory | null => {
+  const p = String(place || "").toLowerCase();
+  if (!p || p.includes("no location")) return null;
+  if (
+    (p.includes("erbil") || p.includes("hawler") || p.includes("hewler")) &&
+    !p.includes("outside erbil")
+  )
+    return "Erbil";
+  if (
+    p.includes("outside kurdistan") ||
+    p.includes("iraq") ||
+    p.includes("baghdad") ||
+    p.includes("basra")
+  )
+    return "Outside Kurdistan";
+  if (p.includes("sulaymani") || p.includes("slemani")) return "Sulaymani";
+  if (p.includes("duhok")) return "Duhok";
+  if (p.includes("kirkuk")) return "Kirkuk";
+  return "Outside Erbil";
+};
+
+// The delivery company collects "onHead" from the customer at the door. The
+// second price is what's actually kept once that region's shipping fee is
+// backed out - the same 3,000 / 5,000 / 6,000 tiers the order form charges -
+// so it isn't shown at all for a free-shipping order, which never had a
+// shipping fee folded into what's being collected.
+const getDeliveryAmounts = (order: Order, allOrdersForOrder: Order[]) => {
+  const paid = parseFloat(String(order.initial_payment || "").replace(/[^0-9.-]+/g, "")) || 0;
+  const onHead = Math.max(getCustomerTotalPrice(order, allOrdersForOrder) - paid, 0);
+  const free = isOrderFree(order);
+  const otherPrice = free ? null : Math.max(onHead - getRegionShipping(order.place), 0);
+  return { onHead, otherPrice, free };
+};
 
 const getBoxStatusFromOrders = (boxOrders: Order[]): BoxGroup["status"] => {
   if (boxOrders.length === 0) return "pending";
@@ -313,6 +375,8 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   const [linkingGiftCardBox, setLinkingGiftCardBox] = useState<string | null>(null);
   const [showMuhamadCalculator, setShowMuhamadCalculator] = useState(false);
   const [muhamadSelectedBoxes, setMuhamadSelectedBoxes] = useState<Set<string>>(new Set());
+  const [showDeliveryCalculator, setShowDeliveryCalculator] = useState(false);
+  const [expandedDeliveryBox, setExpandedDeliveryBox] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
   const [verifiedOrders, setVerifiedOrders] = useState<Set<string>>(getVerifiedSet);
   const [missingOrders, setMissingOrders] = useState<Set<string>>(getMissingSet);
@@ -882,6 +946,42 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       `Blue Line Total\nBlue Line Price: ${blueLineMainPrice.toLocaleString()} IQD\nPrice: ${blueLineTotals.price.toLocaleString()} IQD\nBox Cost: ${blueLineTotals.cost.toLocaleString()} IQD\nWeight: ${blueLineTotals.weight}\nProfit: ${blueLineTotals.profit.toLocaleString()} IQD\nLoss: ${blueLineTotals.loss.toLocaleString()} IQD\n\n${rows}`,
     );
   }, [blueLineMainPrice, blueLineTotals, selectedMuhamadBoxes]);
+
+  const deliveryReport = useMemo(() => {
+    const regionOrderCounts: Record<DeliveryPlaceCategory, number> = {
+      Erbil: 0,
+      "Outside Erbil": 0,
+      Sulaymani: 0,
+      Duhok: 0,
+      Kirkuk: 0,
+      "Outside Kurdistan": 0,
+    };
+    const perBox = boxes.map((box) => {
+      const boxCategoryTotals = makeEmptyCategoryTotals();
+      let boxTotal = 0;
+      let boxOtherTotal = 0;
+      const orderRows = box.orders.map((order) => {
+        const { onHead, otherPrice, free } = getDeliveryAmounts(order, allOrders);
+        // Backing out the shipping fee makes no sense to skip just because an
+        // order is free-shipping - it never had a shipping charge folded into
+        // onHead in the first place, so nothing needs to be subtracted (same
+        // as a "no location" order, which the deduction is already 0 for).
+        const effectiveOtherPrice = free ? onHead : otherPrice!;
+        boxTotal += onHead;
+        boxOtherTotal += effectiveOtherPrice;
+        const category = getDeliveryPlaceCategory(order.place);
+        if (category) {
+          boxCategoryTotals[category] += onHead;
+          regionOrderCounts[category] += 1;
+        }
+        return { order, onHead, otherPrice, free, category };
+      });
+      return { box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows };
+    });
+    const grandTotal = perBox.reduce((sum, entry) => sum + entry.boxTotal, 0);
+    const grandOtherTotal = perBox.reduce((sum, entry) => sum + entry.boxOtherTotal, 0);
+    return { regionOrderCounts, perBox, grandTotal, grandOtherTotal };
+  }, [boxes, allOrders]);
 
   const handleToggleMuhamadCalculator = useCallback(() => {
     if (!showMuhamadCalculator) {
@@ -1696,9 +1796,17 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           {canUseBoxTools && (
             <button
               onClick={handleToggleMuhamadCalculator}
-              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-sm font-semibold transition-all border ${showMuhamadCalculator ? "bg-emerald-500 text-white border-emerald-500 shadow-sm" : "bg-secondary text-foreground border-border hover:bg-secondary/80"}`}
+              className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-full text-xs font-semibold transition-all border ${showMuhamadCalculator ? "bg-emerald-500 text-white border-emerald-500 shadow-sm" : "bg-secondary text-foreground border-border hover:bg-secondary/80"}`}
             >
-              <Calculator size={14} /> Blue Line
+              <Calculator size={12} /> Blue Line
+            </button>
+          )}
+          {canUseBoxTools && (
+            <button
+              onClick={() => setShowDeliveryCalculator((p) => !p)}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-full text-sm font-semibold transition-all border ${showDeliveryCalculator ? "bg-blue-500 text-white border-blue-500 shadow-sm" : "bg-secondary text-foreground border-border hover:bg-secondary/80"}`}
+            >
+              <Truck size={14} /> Delivery
             </button>
           )}
           {canUseBoxTools && (
@@ -1841,6 +1949,117 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                   <span className="w-16 shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-center font-bold tabular-nums text-sky-600 dark:text-sky-400 sm:w-20">
                     {blueLinePrice.toLocaleString()}
                   </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {canUseBoxTools && showDeliveryCalculator && (
+        <div className="rounded-xl border border-blue-500/25 bg-card p-2 shadow-sm sm:p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-wrap gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase text-muted-foreground">
+                  Delivery Total
+                </div>
+                <div className="text-xl font-bold tabular-nums text-blue-600 dark:text-blue-400">
+                  {deliveryReport.grandTotal.toLocaleString()} IQD
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  To collect across {boxes.length} box{boxes.length === 1 ? "" : "es"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase text-muted-foreground">
+                  Without Delivery
+                </div>
+                <div className="text-xl font-bold tabular-nums text-foreground">
+                  {deliveryReport.grandOtherTotal.toLocaleString()} IQD
+                </div>
+              </div>
+            </div>
+            <div className="grid flex-1 grid-cols-2 gap-1.5 text-[10px] sm:grid-cols-3 sm:text-[11px] lg:max-w-3xl lg:grid-cols-6">
+              {DELIVERY_PLACE_CATEGORIES.map((category) => (
+                <div key={category} className="rounded-lg bg-secondary px-2 py-1.5">
+                  <div className="truncate font-semibold uppercase text-muted-foreground">
+                    {category}
+                  </div>
+                  <div className="font-bold tabular-nums">
+                    {deliveryReport.regionOrderCounts[category]} order
+                    {deliveryReport.regionOrderCounts[category] === 1 ? "" : "s"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 max-h-96 space-y-1.5 overflow-auto custom-scrollbar">
+            {deliveryReport.perBox.map(({ box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows }) => {
+              const displayName = box.box_name.replace(/^box[\s-]*/i, "").trim() || box.box_name;
+              const isExpanded = expandedDeliveryBox === box.box_name;
+              return (
+                <div key={box.box_name} className="rounded-lg border border-border bg-secondary/40">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedDeliveryBox((current) =>
+                        current === box.box_name ? null : box.box_name,
+                      )
+                    }
+                    className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left"
+                  >
+                    <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold">
+                      {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      Box {displayName}
+                    </span>
+                    <span className="flex flex-wrap items-center justify-end gap-1">
+                      {DELIVERY_PLACE_CATEGORIES.filter((c) => boxCategoryTotals[c] > 0).map((c) => (
+                        <span
+                          key={c}
+                          className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+                        >
+                          {c}: {boxCategoryTotals[c].toLocaleString()}
+                        </span>
+                      ))}
+                      <span className="text-right leading-tight">
+                        <span className="block rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                          {boxTotal.toLocaleString()}
+                        </span>
+                        <span className="mt-0.5 block text-[9px] font-semibold text-muted-foreground">
+                          {boxOtherTotal.toLocaleString()}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                  {isExpanded && (
+                    <div className="space-y-1 border-t border-border px-2.5 py-1.5">
+                      {orderRows.map(({ order, onHead, otherPrice, free, category }) => (
+                        <div
+                          key={`${order.id}-${order.sheet_name}`}
+                          className="flex items-center justify-between gap-2 rounded-md bg-card px-2 py-1 text-[11px]"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold">
+                              {order.name || order.insta || `#${order.id}`}
+                            </div>
+                            <div className="truncate text-[9px] text-muted-foreground">
+                              {category || order.place || "-"}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold tabular-nums">
+                              {onHead.toLocaleString()}
+                            </div>
+                            <div className="text-[9px] tabular-nums text-muted-foreground">
+                              {free ? "-" : otherPrice!.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
