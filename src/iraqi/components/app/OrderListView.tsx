@@ -893,7 +893,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                         +{primaryImgs.length - 1}
                       </div>
                     )}
-                    {!isDeliveryTab && order.linkedOrderIds && order.linkedOrderIds.length > 0 && (
+                    {!isDeliveryTab && otherLinkedOrder && (
                       <div className="absolute bottom-1 right-1 bg-background/80 backdrop-blur rounded p-1 flex items-center gap-1 shadow-sm">
                         <Link2 size={12} className="text-primary" />
                       </div>
@@ -1051,9 +1051,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                           +{primaryImgs.length - 1}
                         </div>
                       )}
-                      {!isDeliveryTab &&
-                        order.linkedOrderIds &&
-                        order.linkedOrderIds.length > 0 && (
+                      {!isDeliveryTab && otherLinkedOrder && (
                           <div className="absolute -bottom-1 -right-1 bg-background rounded-tl p-0.5 shadow-sm">
                             <Link2 size={10} className="text-primary" />
                           </div>

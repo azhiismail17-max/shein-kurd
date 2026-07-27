@@ -428,9 +428,62 @@ function getCompleteLinkedRefs(seedRefs) {
   return queue;
 }
 
+function gsNormalizePhoneNumber(value) {
+  var digits = (value || "").toString().replace(/\D/g, "");
+  if (digits.indexOf("964") === 0) digits = digits.slice(3);
+  if (digits.indexOf("0") === 0) digits = digits.slice(1);
+  var m = digits.match(/7\d{9}/);
+  if (!m) return "";
+  var phone = m[0];
+  if (/^(\d)\1+$/.test(phone)) return "";
+  return phone;
+}
+
+function gsGetRowPhones(sheet, row) {
+  var raw = sheet.getRange(row, 9).getValue().toString();
+  var parts = raw.split("/");
+  var phones = [];
+  for (var i = 0; i < parts.length; i++) {
+    var p = gsNormalizePhoneNumber(parts[i]);
+    if (p && phones.indexOf(p) === -1) phones.push(p);
+  }
+  return phones;
+}
+
+function gsGetRowInstagram(sheet, row) {
+  return sheet.getRange(row, 1).getValue().toString().trim().toLowerCase().replace(/^@+/, "").replace(/\s+/g, "");
+}
+
+// Same rule as the client (OrderFormView / OrderListView): two orders may
+// only be linked if they share a phone number or an Instagram handle.
+// Checked again here, at the point the sheet is actually written, so a bad
+// link can never reach the data no matter which client sent it - the
+// picker, the bulk-link action, or an old cached app version still running
+// on someone's phone that predates a client-side fix.
+function gsIsSameCustomerRow(sheetA, rowA, sheetB, rowB) {
+  var instaA = gsGetRowInstagram(sheetA, rowA);
+  var instaB = gsGetRowInstagram(sheetB, rowB);
+  if (instaA && instaA === instaB) return true;
+  var phonesA = gsGetRowPhones(sheetA, rowA);
+  var phonesB = gsGetRowPhones(sheetB, rowB);
+  for (var i = 0; i < phonesA.length; i++) {
+    if (phonesB.indexOf(phonesA[i]) > -1) return true;
+  }
+  return false;
+}
+
 function relinkOrderRefs(targetRow, targetSheetName, linkedRefs) {
   var targetRef = normalizeOrderRef(targetRow, targetSheetName);
+  var targetSheetObj = getOrderSheetByName(targetSheetName);
   var newGroup = parseOrderLinkRefs(linkedRefs || [], targetSheetName);
+  if (targetSheetObj) {
+    newGroup = newGroup.filter(function(ref) {
+      if (ref.key === targetRef) return true;
+      var refSheet = getOrderSheetByName(ref.sheetName);
+      if (!refSheet) return false;
+      return gsIsSameCustomerRow(targetSheetObj, targetRow, refSheet, ref.row);
+    });
+  }
   if (newGroup.filter(function(o) { return o.key === targetRef; }).length === 0) {
     newGroup.push({ row: parseInt(targetRow, 10), sheetName: targetSheetName, key: targetRef });
   }
