@@ -275,10 +275,7 @@ export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
 
       const linkedRefs = (candidate.linkedOrderIds || [])
         .filter((id) => !isUnlinkMarker(id))
-        .map((id) => ({
-          key: normalizeLinkedKey(id, candidate.sheet_name),
-          isManualComposite: String(id).includes(":"),
-        }));
+        .map((id) => ({ key: normalizeLinkedKey(id, candidate.sheet_name) }));
       const linkedKeys = linkedRefs.map((ref) => ref.key);
       const sameCustomerReceipt = isSameCustomerReceipt(order, candidate);
       const touchesCluster =
@@ -287,15 +284,24 @@ export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
         linkedKeys.some((key) => clusterKeys.has(key));
 
       if (!touchesCluster) continue;
-      const hasManualLinkToCluster = linkedRefs.some(
-        (ref) => ref.isManualComposite && clusterKeys.has(ref.key),
-      );
-      const hasLegacyLinkToCluster = linkedRefs.some((ref) => clusterKeys.has(ref.key));
+
+      // A recorded reference is only honored if the two orders it names are
+      // still provably the same customer right now. The old code trusted any
+      // reference written in "id:sheet" form on sight, so one bad or stale
+      // row - a direct sheet edit, leftover from a past bug, a one-way
+      // reference left behind on just one side - kept pulling an unrelated
+      // customer into the group forever. That bad row was immune to every
+      // fix made to the places that create links, since those only stop new
+      // bad writes and never re-check old ones. Re-checking identity here
+      // means a bad reference simply stops rendering as linked, from
+      // whatever source it came.
+      const hasValidLinkToCluster = linkedRefs.some((ref) => {
+        if (!clusterKeys.has(ref.key)) return false;
+        const target = ordersByKey.get(ref.key);
+        return target ? isSameCustomer(candidate, target) : false;
+      });
       const canAddCandidate =
-        clusterKeys.has(candidateKey) ||
-        sameCustomerReceipt ||
-        hasManualLinkToCluster ||
-        (hasLegacyLinkToCluster && isSameCustomerReceipt(order, candidate));
+        clusterKeys.has(candidateKey) || sameCustomerReceipt || hasValidLinkToCluster;
       if (!canAddCandidate) continue;
 
       if (!clusterKeys.has(candidateKey)) {
@@ -305,9 +311,7 @@ export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
 
       linkedRefs.forEach((ref) => {
         const linkedOrder = ordersByKey.get(ref.key);
-        const canAddLinkedOrder =
-          ref.isManualComposite || (linkedOrder && isSameCustomerReceipt(order, linkedOrder));
-        if (linkedOrder && canAddLinkedOrder && !clusterKeys.has(ref.key)) {
+        if (linkedOrder && isSameCustomer(candidate, linkedOrder) && !clusterKeys.has(ref.key)) {
           clusterKeys.add(ref.key);
           changed = true;
         }
