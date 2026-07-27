@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, Smartphone, X } from "lucide-react";
+import { BellRing, CheckCircle2, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import {
   canRoleUsePush,
@@ -13,7 +13,6 @@ interface PushNotificationOnboardingProps {
 }
 
 const ENABLED_KEY = "phone_push_v3_enabled";
-const SESSION_DISMISSED_KEY = "phone_push_v3_setup_dismissed";
 
 const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
   role,
@@ -40,10 +39,12 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
     };
   }, []);
 
+  // Owner and admin cannot use the system without granting real push
+  // permission - there is no dismiss path here by design, only the iPhone
+  // install instructions for the one case where the browser can't even ask.
   useEffect(() => {
     if (!canRoleUsePush(role)) return;
     if (localStorage.getItem(ENABLED_KEY) === "true") return;
-    if (sessionStorage.getItem(SESSION_DISMISSED_KEY) === "true") return;
 
     const timer = window.setTimeout(() => setIsOpen(true), 650);
     return () => window.clearTimeout(timer);
@@ -65,11 +66,6 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
       username: localStorage.getItem(usernameKey) || role,
     });
   }, [role, system]);
-
-  const dismissForSession = () => {
-    sessionStorage.setItem(SESSION_DISMISSED_KEY, "true");
-    setIsOpen(false);
-  };
 
   const enablePush = async () => {
     if (!role || isEnabling) return;
@@ -125,14 +121,6 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
     >
       <div className="w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card text-card-foreground shadow-2xl">
         <div className="relative bg-gradient-to-br from-red-700 via-red-800 to-slate-950 px-6 pb-7 pt-8 text-white">
-          <button
-            type="button"
-            onClick={dismissForSession}
-            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white/80 transition-colors hover:bg-white/20 hover:text-white"
-            aria-label="Not now"
-          >
-            <X size={18} />
-          </button>
           <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/20">
             <BellRing size={28} />
           </div>
@@ -184,13 +172,6 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
               : deviceState.needsIosInstall
                 ? "Show iPhone setup"
                 : "Enable real notifications"}
-          </button>
-          <button
-            type="button"
-            onClick={dismissForSession}
-            className="w-full py-1 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Not now
           </button>
         </div>
       </div>
