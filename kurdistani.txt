@@ -13,35 +13,43 @@
 var ACTIVE_SHEET_NAME = "July";
 
 // *** MANUAL COUNTS FOR PAST MONTHS ***
-// April/May/Juni/Julyi/Augi/Sept/Octo used to be guessed numbers here because
-// actually reading their orders was never wired up. Now that they have a real
-// reader (legacyFormat below) that's cheap to run - a handful of columns,
-// ~100-120 rows - the count comes from actually reading the sheet every time,
-// live, instead of a number someone typed in once that quietly went stale.
+// April/May/Juni/Julyi/Augi/Sept/Octo used to be guessed numbers here.
+// They're static months now (see EXTERNAL_SOURCES below) with their real
+// order count always available instantly from the embedded data, so they
+// no longer need an entry here at all.
 var MANUAL_COUNTS = {
   "Jan": 197, "Dece": 130, "Nove": 112
 };
 
 // 1. EXTERNAL FILES
-// legacyFormat marks a month whose original file doesn't use the modern
-// 33-column layout every other month uses - it changes how the individual
-// order list is read. The four aggregate cell refs (priceCell/balanceCell/
-// costBuy.../costWgt.../costEtc...) still work for the Financial Overview
-// totals either way, since those just read one fixed cell each regardless.
-//   "name_price": only a customer name (col A) and a price (col C), from
-//     row 3 through however many rows the sheet has.
-//   "detailed": insta (A:B), name (C:D), place (E:F), price (I:K), phone
-//     (U:W), each a per-row merge holding its value in the first column -
-//     from legacyStartRow through legacyEndRow. legacyHasPics also reads a
-//     piece count from O:Q (October has this column; September doesn't).
+// April/May/Juni/Julyi/Augi/Sept/Octo used to be read by opening a separate
+// Google Sheet by ID (SpreadsheetApp.openById), which turned out to be the
+// wrong file/project more than once and is fragile in general - the ID has
+// to stay shared with whichever account this script runs as, and every one
+// of these files uses a layout nothing like the modern sheet anyway. Their
+// order data is now embedded directly below (LEGACY_ORDERS_*), taken
+// straight from each month's Excel file - no open-by-ID call happens for
+// them at all anymore, so there is nothing left to misconfigure or lose
+// access to. Nove is the only month still read live from an external sheet.
+//
+// "name_price" rows are [name, price]. "detailed" rows are
+// [insta, name, place, price, phone, pics] (pics is "" where not tracked).
+var LEGACY_ORDERS_APRIL = [["bana abdulla",13750],["lana",15250],["mardin shadan",43750],["bahra",5000],["sarmand",233500],["estila 01",37000],["پۆشاکی خانمان",35250],["bahez bardan",112000],["kj",23000],["bahra blbas",75000],["sharo rzgar",91500],["hawrin abdulrahman",21250],["sima shexani",74000],["sumaya",79000],["sawda ibrahim",114000],["razhan",87000],["poshaki xanman",40000],["chra",190000],["avin",137500],["sara sardar",66000],["پۆشاکی خانمان",201000],["هودا واتس ئەپ",75000],["ئەژار",6750],["دەریا",102000],["سومەیە رحمی",35750],["خۆری هەڵهاتوو",29750],["مامۆستا شیلان",27000],["naul-0",12500],["aladawd",166000],["haras",40000],["bahra blbas",122250],["bahra",27250],["lawand",8000],["bahra blbas",37250],["teshko",45000],["marwa",9500],["سومەیە",44500],["sana sardar",135000],["sumayay xoman",101500],["dayalovesuju",95000],["with-linn",20500],["shayar Mustafa",42500],["soma Sana",38250],["didar muhamad",22000],["elaf gardi",41750],["sumaya rah",45000],["frishta",6500],["shawnaz",74000],["nawa",10000],["hana",75000],["nyaz xoman",60000],["lana",77000],["ch.r4a",121000],["shawnaz",17500],["with.lin",71000],["sara xalil",16500]];
+var LEGACY_ORDERS_MAY = [["shadan",163000],["aram",15000],["hana jaff",57000],["soma ( hana)",22000],["heshw",246000],["with.lina",71000],["ch.r4",52000],["osama",20500],["eleven._.12",18500],["soma",5500],["solin bradarm",14750],["rewar whatsapp",40000],["lana",46750],["avin whastapp",118250],["aysha yassen",13750],["lila xatun",78000],["elevan._.12",8000],["sharo",17250],["ch.r4",23750],["bahra",20500],["eman",50000],["aesha abdullah",135000],["bahez_badran",102000],["sara khalili",4750],["soma sanna",6500],["parzhin",150250],["dnya dler",26000],["saro",77000],["chra",325000],["avin whats app",65750],["sumaya 3",20000],["shawnaz",59000],["پۆشاکی خانمان",31750],["kani",154750],["Savo",19000],["dimo nyaiz",112000],["sumaya 3",6000],["soza akram",26500],["sumaya 3",20500],["poshaki xanman",122500],["maryana kurdi",32000],["muna",6000],["ماردین",92000],["qshtapa",4500],["خوشکێ",7750],["mamosta shelan",17000],["payma stori",415000],["eman",20000],["shayda xayat",138000],["nuna art",27000],["kelly rasul",70000],["parzhin",21750],["poshaki xanman",88250],["chyavan fasl",82000],["bahra",29000],["Kani",299000],["خوشکی سومەیەی",20500],["دایە",5000],["پۆشاکی خانمان",3250],["shewa",44000],["awate bradarm",77000],["poshaki xanman",42000],["salh",35000],["poshaki xanman",207000],["fatima ozel",284000],["shyda xayat",49750],["ya09ra",24500],["soma",29000],["du3a",43500],["haras",23500],["9239",23500]];
+var LEGACY_ORDERS_JUN = [["eman",20000],["frishta haji",8750],["azhassan",26000],["anas",13500],["roz gull",36500],["saman blbas",26000],["ayman",6500],["dimo",276000],["sikma.00",43000],["asrea",46000],["sarwen",23500],["azhin",17000],["lana",12250],["asya abdulla",80000],["elvan",36000],["soz",57500],["bahra",35000],["sina.rkd",5500],["shadi",28000],["sterpiromary",59000],["eman",5000],["shayda xayat",15500]];
+var LEGACY_ORDERS_JULY = [["sara abdulla",131000],["گەشاو",26000],["دایە",9000],["چاوان",32500],["bea omer",89000],["sida",12000],["bea",39750],["haras",7000],["lawan",19000],["ramen zana",102500],["shayda",38000],["مامۆستای لاوانی",0],["فاتیمە",46500],["chawan",27500],["sozi ako",33000],["muna",4500],["shayda xayat",12500],["chawan",42000],["razhan",78000],["slivan",66000],["me",15500],["نەوا",5750],["ژاڵە",82000],["ئاسیە",23750],["ئاسیە",12750],["ژاڵە",21750],["هەرەس",3500],["shahin farhad",32000],["sara bahjart",36000],["soma sana",31000],["eman sirwan",8000],["lana",15000],["bahra",13500],["بەخۆم",2500],["avin whats",149000],["sirwan",3000],["rahma salami",35000],["dayke mer",180000],["01 تیلیگرام",109000],["alan waki",51750],["shahin farhad",22500],["berivan",55000],["sumaya",18500],["hars",18500],["soma sarhang",39750],["burshra",251000],["nagii",26000],["شەیدا خەیات",62500],["bahra m",57500],["lava",2000],["soma sarhang",4750],["hars",5500],["duna artest",25250],["yara",32500],["ayman",2750],["nurse",63250],["mobilya",70000]];
+var LEGACY_ORDERS_AUGI = [["yanar",14500],["soma sanhan",2250],["poshaki xanman",125500],["eman j hussen",28750],["przha  rzgar",61250],["renma",65000],["shadan",25500],["solin bradarm",38000],["ala",75500],["kuestan bradarm",95750],["poshaki xanman",73000],["kuestan",20000],["eman",24000],["meow",39500],["eman sirwan",8500],["shara",62750],["chiman",2500],["lana",15250],["soma",159000],["raz lak",36000],["aa.ssa",70750],["poshaki xanman",0],["مامۆستای لاوانی",32750],["payam stori",60000],["nma",3000],["mawa salih",62500],["rozhan",12500],["asya kochar",45000],["shayda xayat",31500],["chawan",56750],["islam",55500],["shawnaz",65750],["shawbo",23500],["mamosta shelan",89000],["islam",2500],["avin",131000],["hars",4500],["dyari",7500],["poshaki xanman",0],["dalya",35000],["hazara qadir",116000],["islam",18250],["eman",62000],["naza",0],["dayki meer",81000],["somi",34000],["بەخۆم",4000],["dayki mer",2500],["nyan",264500],["ayman",48000],["alla",28750],["خوشکی سومەیەی",26000],["baxom",12750],["lana",5000],["tariq fareq",91000],["bea.omer",74750],["meme hemn",36000],["ahmed qadir",57750],["haras",9000],["خزمی avin wahtsapp",40000],["bea.omer",50250],["hero kurdi",47250],["jeran",48750],["bea",5500],["chra",97500],["soma",58000],["shankar",48250],["jeran",6250],["نارین ئنوەڕ",17250],["chawan",72500]];
+var LEGACY_ORDERS_SEPT = [["diman_sharef","deya sharif","سلێمانی- کانی بەردان",31500,"7708471414",""],["eman_dyari","eman j hussen","هەڵەبجەی شەهید",66500,"751437698",""],["nomyada536","9239","کۆیە",23000,"7500570316",""],["shakar.198","shakar sh zrary","هەولێر",10500,"7504536387",""],["","eman asad","هەولێر",202500,"7503357274",""],["ig._.shenaz","","سلێمانی",102000,"7701520735",""],["","sumaya center","",9250,"",""],["","bahra","قوشتەپە",8500,"",""],["p4r.ee1","pary","چوارقورنە",3500,"",""],["","eman nawa","",11250,"",""],["","jeran","",7000,"",""],["","rezhna gardi","هەولێر",248000,"7507703040",""],["","deya sharif","سلێمانی",19750,"7722980606",""],["ayaranzii","ئایە","هەولێر-هیران سیتی",77500,"07512353446 , 07517566728",""],["","ronya","هەولێر",27000,"07504357868 , 07507648822",""],["","hema","هەولێر",152000,"7505045153",""],["","sivar kamaran","حاجیاوە",245250,"7505597683",""],["","rojen","دهۆک",102000,"7504580211",""],["","rahand marewa","سلێمانی",206500,"7701038603",""],["","lawan azad","سلێمانی-راپەرین گەرەکی خاک",0,"07701349994-07501328996",""],["","shene muhamad","سلێمانی -چوارباخ",0,"0770 243 84 86",""],["","chawan","سلێمانی -کانی گۆمە",134750,"7708324355",""],["","کاک ابراهیم","",260000,"",""],["","bahra m sabir","هەولێر- فەرمانبەران",74000,"0750 5029195",""],["","بەهرە","",12250,"",""],["","lana","",17750,"",""],["","payam stori","کەلار-سەلاحەدین",142000,"7709687258",""],["","helen kamaran","هەولێر-٥حەسارۆک",44250,"",""],["","chiman","",2250,"",""],["","suise","کەرکوک",104500,"0750 357 64 95",""],["","solin bradar","هەولێر",61000,"750 844 2324",""],["","sraw vibar","",6000,"751 744 1361",""],["","yanar","",16000,"",""],["","hero mirgasori","قەزای مێرگەسۆر",11500,"0750 494 1212",""],["","shene muhamad","سلێمانی - چوارباخ",46000,"",""],["","chawan bahadin","سلێمانی -کانی گۆمە",155500,"7708324355",""],["","گولی بەهار","هەولێر-ناحیەی رزگاری",64500,"7518127675",""],["naz.mch","","رانیە",6250,"0770 945 53 53",""],["user-tawaaa","","رانیە",12500,"0750 105 8676",""],["shelan.salem55","shelan salem","هەولێر-گوندی ئیطالی",11000,"7504956417",""],["","solen bradarm","",59750,"",""],["zheenheci","1610","دهۆک -ئێتیت",75000,"07504844817 ، 07512252952",""],["azhssan","azhassan","هەولێر-شاری زیتونە",44500,"7504707069",""],["nigaaram","niga","رێگای کەرکوک سلێمانی",70500,"7700002893",""],["nothiiiing.22","","سلێمانی -تاسلوجە",34000,"7761523523",""],["","draxshan","",34000,"",""],["shahheenfjaff","shaheen farhad","هەولێر -121 گوڵارن",32750,"7504499414",""],["dedary_kabba","talya.online","هەولێر -سێبەرۆان",117000,"7830920448",""],["mr.ebrahim.hajy.marewan","mr ebrahim","شەمامک ـ پیرداود",107500,"7517813404",""],["","دیاری","هەولێر - مامزاوە",2000,"",""],["delvin-15","","هەولێر - عەنکاوە",49000,"7514102419",""],["azhssan","azhassan","هەولێر - زەیتونە",47000,"7504707069",""],["preste.wali","","هەولێر - شەست مەتری",27000,"7511313854",""],["desary_kabba","talya.online","هەولێر - سێبەردان",20000,"7830920448",""],["solay_aramy","solay aram","هەولێر - هاوکاری",67000,"",""],["","ashlyan","",47750,"",""],["","gigi","",32250,"",""],["","لقاء","",34750,"",""],["","avin","",52750,"",""],["","lana","",14250,"",""],["","hi 99","",15000,"",""],["","drawing laith","",38000,"",""],["","shanya jawhar","",69750,"",""],["","sozan dlawar","",226750,"",""],["","huda WhatsApp","",180000,"",""],["","selin","",117250,"",""],["","hi-99i","",4500,"",""],["","hars","",3500,"",""],["","Azhin","هەولێر- سێبەردان",39000,"",""],["","muna","",3000,"",""],["","bushra","سەنتەر",8000,"",""],["","sraw whatsapp","سەنتەر",16000,"",""],["","xzmi avin whatsapp","زاخۆ",127000,"7504502154",""],["","lana","قوشتەپە",15500,"",""],["","helin hazhar","هەولێر - باداوە",72000,"",""],["hero1_929","","هەولێر - تورەق",97000,"07509792454, 07507712435",""],["","eman","",20500,"",""],["","ayman","",14000,"",""],["ig._.shenaz","","سلێمانی - چوارچرای نوێ",137000,"7701520735",""],["","ahmed qadir","هەولێر - سێبەردان",1250,"",""],["","امل یاسین","هەولێر - سێبەردان",30500,"7508267170",""],["","xalt","هەولێر - تەیراوە",48750,"07506183432 ،07504623239",""],["chr5aa","chra","کەروک - تەپە",140000,"7763067606",""],["deman-sharif","deman sharifi","سلێمانی",15000,"7708471414",""],["","chawan bahadin","سلێمانی - کانی گۆمە",82000,"7708324355",""],["","eman","قوشتەپە",13000,"",""],["","نەشمیل","سەنتەر",31250,"",""],["","nashmil messenger","هەولێر",35500,"",""],["","eman","",4250,"",""],["","anas","",14000,"",""],["","huda ramazan","هەولێر - خەبات",67000,"7508724499",""],["","deya sharifi","",19500,"7502395443",""],["","eman","",1750,"",""],["itsfatma","garmaiin fuad","سلێمانی - کانی بەگ",117500,"7732000525",""],["frishtahaji","frishta","رانیە - حاجیاوە",2500,"9.6475E+12",""],["","سیما عبدالسلام","هەولێر - هەڤاڵان",118000,"",""],["helin-shed-abdullah","helin abdullah","چەمچەماڵ",36500,"0770 913 6055, 07739255363",""],["delvin-15","","هەولێر - عەنکاوە",14500,"7514102419",""],["nawa","","",3500,"",""],["zhya","","",17500,"",""],["helin hazhar","whatsapp","هەولێر - باداوە",64000,"",""],["elaff.bryar","","چەمچەماڵ",96000,"7738839443",""],["chawan.bahaddin","chawan xan","سلێمانی - کانی بەگ",115000,"",""],["مامۆستا شیلان","","",48500,"",""],["","برادەری بەهرەی","هەولێر -قوشتەپە",68500,"",""],["","خزمی avin whatsapp","زاخۆ",90000,"",""],["","meow","هەولێر -32 پارک",24750,"",""],["","nashmel","",8750,"",""],["solay-aramy","","هەولێر - شاوێس",49000,"7504361350",""],["","nursi","",63750,"7722149492",""],["bargduri-lin","","سلێمانی - راپەرین",31500,"",""],["","garmin fuad","سلێمانی - کانی بەگ",76000,"7700585828",""],["","asma","",14750,"",""],["","sumaya","سەنتەر",75000,"",""],["","","",76500,"",""],["","","",234250,"",""]];
+var LEGACY_ORDERS_OCTO = [["","hawmaza snap","هەولێر",24250,"","8"],["danyar.taher","","سلێمانی",5000,"","2"],["","muna","",11500,"","4"],["garmian.fuad","","سلێمانی کانی بەگ",31250,"","2"],["","sukuna 4life","هەڵەبجە",109500,"","18"],["","yanar","قوشتەپە",6250,"","3"],["","chawan","چوارچرا",0,"","4"],["mr.ibrahim.haji.marewan","with ebo","پیرداود",138000,"7517813404","22"],["dlkhwazm","dlkhwaz mahamad","هەولێر - شۆرش",30000,"7500554546","20"],["","frishta","",12000,"",""],["","balla karwan","سلێمانی",39000,"",""],["","rozhan","",8000,"",""],["","bilal sponsor","",45000,"",""],["dlvein-15","","هەولێر",28500,"","3"],["","deya sharifi","",9750,"","5"],["","chawan","سلێمانی",40000,"","4"],["S_h.der4a","deraa","بازیان گەرەکی برایەتی",24500,"7702587151",""],["","Garmin fuad","هەولێر - دارەتوو",33000,"7700585828","1"],["sazan_abdulqadir","","",95000,"7517679467","12"],["awaraazd","awara azad","قەڵادزێ",60000,"7501756113","6"],["","yanar","قوشتەپە",14500,"","3"],["razhanbarzani","razhan","هەولێر - گەنجان لایڤ",46750,"","8"],["","kuistan latif","",17000,"","1"],["","هەنارەیی","سلێمانی -ابورێناسان سیتی",45000,"","3"],["","hanar","",48000,"","7"],["","bahra","",75750,"","12"],["","زاخۆ","زاخۆ",113000,"","26"],["sima.design9","","هەولێر",10000,"","2"],["","bano","هەولێر - سەنتەر",55000,"","7"],["","rozhan","",21000,"","2"],["ayaramziii","ئایە","هەولێر - هیران سیتی",56750,"","4"],["its.mooon","","سلێمانی - مامەیار",61500,"7731583234","18"],["runa-barzani","run mzuri","هەولێر - بەحرکە",85750,"","17"],["ha_ny_hanar","لالە شەماڵ","سلێمانی - کازێوە",0,"","13"],["","جیران","",0,"","4"],["hawar_shexani","hawrin abdulah","هەولێر - کوران",0,"7514639090","3"],["mobina_j_ali","","کەلار",0,"7709014849","3"],["","zhya","",0,"","1"],["","مامۆستا شیلان","",0,"",""],["","مامۆستا شیلان زیا","",18750,"",""],["","مامۆستا شیلان زایان","",23500,"",""],["","مامۆستا شیلان لەیلا","",26500,"",""],["d.nne4","","سۆران",76750,"",""],["","کوێستانی برادەرم","هەولێر - زیلان",82000,"",""],["helan.khoshnaw","","سۆران",57750,"07824704666-07503143425",""],["ig._sh4iista","","سلێمانی",387000,"7511542004","38"],["","yanar","قوشتەپە",29750,"",""],["ig._.shenaz","","سلێمانی - چوار چرای نوێ",371000,"7701520735","47"],["el.oct0","","هەولێر - ئیمپایەر",45000,"7502575150",""],["","hanar","",8500,"",""],["","chra","هەولێر -121 گوڵان",105000,"7508337442","10"],["","kwestan","",6250,"",""],["lady.amiiraa","amira","هەولێر",32750,"7502675150-07517929766",""],["z4rdaa.1","","هەولێر - رێگای مەخمور",61000,"7508774726","20"],["shakira_barzani","shakira","هەولێر - 18 شوبات",47000,"7517693638","7"],["dastan8121","","سلێمانی",84000,"7701427042","11"],["","بوشرا","سەنتەر",16000,"",""],["its_.moonn","","سلێمانی - مامە یار",14500,"7731583234","5"],["chr5aaa","","کەرکەک",29000,"7763067606",""],["","asya","ناحیەی گوێزە",66000,"",""],["","payam stori","کەلار - شەهیدان",230500,"7709687258","26"],["","halima rashed","هەولێر - گەرەکی ژیان",521000,"7504307667","34"],["","جیران","",3500,"","2"],["","shayan saber","رانیە - نەخۆشخانەی منداڵ بوون",230000,"7517598267","22"],["II_sh4iim4","","کۆیە",34500,"","2"],["","lana","",7750,"","2"],["","lana","",62750,"",""],["","bushra","",8000,"","4"],["harven8377","harvem","هەولێر - خانزارد",231000,"7509221502","35"],["","shayan sabyr","رانیە",103000,"7517598267","9"],["","slemany lea","سلێمانی - کانی سپیکە",10500,"","4"],["theyluv.sidaa1","sidaa","سلێمانی",7750,"","4"],["fa-fatimaaa5","fatima","زاخۆ",30000,"","2"],["_.liin._aa22","lina","سلێمانی",121000,"","14"],["sanasardar62","sana","سلێمانی - خەبات",0,"7717621075",""],["qashangmasoud","","هەولێر - موفتی",20500,"7504103626","8"],["helen.msher","","چوارقورنە",26000,"","4"],["","soma canter","",64000,"","19"],["ne_1a4m","she","کەرکوک",35000,"7781780187","14"],["","shangar sleman","هەولێر - فەرمانبەران",22000,"7503079091","4"],["helen.mshir","","چوار قورنە",6750,"","2"],["","begard","",15250,"","9"],["","sara khalil","شۆڕش",45000,"","10"],["","lana","",11500,"",""],["c0smiicc0","bell","سلێمانی - کانی کوردە",19750,"7730024393","4"],["","ala ismail","هەولێر - لەنگەی کۆن",9500,"7511223969","2"],["yoonli1a","lia","هەولێر - بازاری کوران",9000,"7503163675","1"],["","nawraz mawlod","سلێمانی - ئاشتی",19750,"7701565631","8"],["","shayda","خەلیفان",29000,"7831745375",""],["","tabi","سلێمانی",109000,"7706774238",""],["","haras","",2000,"",""],["","nawa","",7000,"",""],["s.ssaayyaa","saya","سلێمانی - راپەرین",34500,"7739909353","10"],["","evian._.m","سلێمانی",0,"7504117793","3"],["helin.kawa","","عەربەت",41000,"7503972520","16"],["shadan_n9","shadan","هەولێر - مەهاباد",39750,"","6"],["","nyan","",299750,"","35"],["","shayda","خەلیفان",43500,"7831745375","12"],["","rojen","دهۆک",51000,"7507636203","17"],["helin.msher","","",14500,"","1"],["","narin","سلێمانی - سەهۆڵەکە",18750,"7766902410","3"],["I______zaiinab","","کەرکوک - رەحیماوە",132500,"","13"],["luv.mr4a8","","کەلەک",159500,"7508828146","56"],["","muna","",1500,"",""],["","mustafa","",18500,"",""]];
+
 var EXTERNAL_SOURCES = [
-  { name: "April", id: "10ZwnwW8X_Y21i04fzYjlo0Aj52Jofb1VHAkVZv0M6Xk", tabName: "April", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59", legacyFormat: "name_price" },
-  { name: "May", id: "17W2qZNidwXX4ezubzyV4UzqGUY4BGNoL90pIbETz0Xw", tabName: "May", priceCell: "C93", balanceCell: "H93", costBuyRange: "D93:E93", costWgtCell: "F93", costEtcCell: "G93", legacyFormat: "name_price" },
-  { name: "Juni", id: "1gFcs7mZjPSWvmRtzkywTnwoDcdDgO5Sx_qbIxsUqstE", tabName: "Jun", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59", legacyFormat: "name_price" },
-  { name: "Julyi", id: "1rWH5fgATyzyWxH0-4s0xuCug_jXRXsabuOJl_ArUN4E", tabName: "Julyi", priceCell: "C90", balanceCell: "H90", costBuyRange: "D90:E90", costWgtCell: "F90", costEtcCell: "G90", legacyFormat: "name_price" },
-  { name: "Augi", id: "1DoUiIxB2mBp3KfWkPidwPzXdqmLRc6fj2wlRsR_xiXo", tabName: "Augs", priceCell: "C98", balanceCell: "H98", costBuyRange: "D98:E98", costWgtCell: "F98", costEtcCell: "G98", legacyFormat: "name_price" },
-  { name: "Sept", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "September", priceCell: "A157", balanceCell: "AA157", costBuyRange: "L157:Q157", costWgtRange: "R157:T157", costEtcRange: "X157:Z157", legacyFormat: "detailed", legacyStartRow: 3, legacyEndRow: 117 },
-  { name: "Octo", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "october", priceCell: "A137", balanceCell: "AA137", costBuyRange: "L137:Q137", costWgtRange: "R137:T137", costEtcRange: "X137:Z137", legacyFormat: "detailed", legacyStartRow: 3, legacyEndRow: 108, legacyHasPics: true },
+  { name: "April", static: true, staticFormat: "name_price", staticOrders: LEGACY_ORDERS_APRIL, staticRevenue: 3553250, staticBalance: 318000, staticBuy: 2883221, staticWgt: 355000, staticEtc: 298529 },
+  { name: "May", static: true, staticFormat: "name_price", staticOrders: LEGACY_ORDERS_MAY, staticRevenue: 4826500, staticBalance: 473570, staticBuy: 3761547, staticWgt: 443000, staticEtc: 148383 },
+  { name: "Juni", static: true, staticFormat: "name_price", staticOrders: LEGACY_ORDERS_JUN, staticRevenue: 876500, staticBalance: 209687, staticBuy: 583813, staticWgt: 82000, staticEtc: 1000 },
+  { name: "Julyi", static: true, staticFormat: "name_price", staticOrders: LEGACY_ORDERS_JULY, staticRevenue: 2403750, staticBalance: 185330, staticBuy: 1890670, staticWgt: 263750, staticEtc: 64000 },
+  { name: "Augi", static: true, staticFormat: "name_price", staticOrders: LEGACY_ORDERS_AUGI, staticRevenue: 3224250, staticBalance: 227750, staticBuy: 2459500, staticWgt: 320000, staticEtc: 217000 },
+  { name: "Sept", static: true, staticFormat: "detailed", staticOrders: LEGACY_ORDERS_SEPT, staticRevenue: 6858000, staticBalance: 747092, staticBuy: 5186008, staticWgt: 755500, staticEtc: 169400 },
+  { name: "Octo", static: true, staticFormat: "detailed", staticOrders: LEGACY_ORDERS_OCTO, staticRevenue: 5895500, staticBalance: 388750, staticBuy: 4525750, staticWgt: 673000, staticEtc: 308000 },
   { name: "Nove", id: "1vtdMAcs8pya4FcAL8DsqOnHtNX0kD_-Bfh4-5x2i34Q", tabName: "November", priceCell: "A150", balanceCell: "K150", costBuyCell: "F150", costWgtCell: "H150", costEtcCell: "J150" }
 ];
 
@@ -59,45 +67,23 @@ function blankLegacyOrder(fields, rowNum, sheetName) {
   }, fields);
 }
 
-// Reads a "name_price" legacy month: just name (A) and price (C) starting
-// row 3, through however many rows that sheet has. Every other order field
-// comes back blank/zero rather than guessed, and is_finished is set since
-// these are closed historical records - not meant to be edited from the app.
-function readLegacyNamePriceOrders(sheet, sheetName) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 3) return [];
-  var values = sheet.getRange(3, 1, lastRow - 2, 3).getValues();
+// Builds the order list for a static legacy month straight from its embedded
+// array above - no sheet involved at all, so nothing about it can point at
+// the wrong file, lose permission, or silently find zero rows. is_finished
+// is set since these are closed historical records, not meant to be edited.
+function buildStaticLegacyOrders(source) {
+  var rows = source.staticOrders;
   var jsonData = [];
-  for (var i = 0; i < values.length; i++) {
-    var name = (values[i][0] || "").toString().trim();
-    if (!name) continue;
-    var price = parseFloat((values[i][2] || "").toString().replace(/,/g, "")) || 0;
-    jsonData.push(blankLegacyOrder({ name: name, price: price }, i + 3, sheetName));
-  }
-  return jsonData;
-}
-
-// Reads a "detailed" legacy month (September/October): insta (A), name (C),
-// place (E), price (I), phone (U), each the first column of a per-row merge,
-// plus a piece count from O when hasPics is set. Some rows only ever got an
-// Instagram handle or only a name, never both, so a row counts as a real
-// order when either one has something - not only when name does.
-function readLegacyDetailedOrders(sheet, sheetName, startRow, endRow, hasPics) {
-  var lastRow = Math.min(endRow, sheet.getLastRow());
-  if (lastRow < startRow) return [];
-  var values = sheet.getRange(startRow, 1, lastRow - startRow + 1, 23).getValues();
-  var jsonData = [];
-  for (var i = 0; i < values.length; i++) {
-    var r = values[i];
-    var insta = (r[0] || "").toString().trim();
-    var name = (r[2] || "").toString().trim();
-    if (!insta && !name) continue;
-    var place = (r[4] || "").toString().trim();
-    var price = parseFloat((r[8] || "").toString().replace(/,/g, "")) || 0;
-    var phone = (r[20] || "").toString().trim();
-    var fields = { insta: insta, name: name, place: place, price: price, phone: phone };
-    if (hasPics) fields.pics_text = (r[14] || "").toString().trim();
-    jsonData.push(blankLegacyOrder(fields, startRow + i, sheetName));
+  for (var i = 0; i < rows.length; i++) {
+    var rowNum = i + 3;
+    if (source.staticFormat === "name_price") {
+      jsonData.push(blankLegacyOrder({ name: rows[i][0], price: rows[i][1] }, rowNum, source.name));
+    } else {
+      var d = rows[i];
+      var fields = { insta: d[0], name: d[1], place: d[2], price: d[3], phone: d[4] };
+      if (d[5]) fields.pics_text = d[5];
+      jsonData.push(blankLegacyOrder(fields, rowNum, source.name));
+    }
   }
   return jsonData;
 }
@@ -729,6 +715,9 @@ function getOrderSheetByName(sheetName) {
   if (sheet) return sheet;
 
   for (var x = 0; x < EXTERNAL_SOURCES.length; x++) {
+    // Static months have no backing sheet at all - there is nothing here to
+    // link, unlink or delete, by design, since they're closed history now.
+    if (EXTERNAL_SOURCES[x].static) continue;
     if (EXTERNAL_SOURCES[x].name === sheetName) {
       try {
         var extSS = SpreadsheetApp.openById(EXTERNAL_SOURCES[x].id);
@@ -1701,6 +1690,25 @@ var loadActiveOnly = !requestedMonth && !loadAllLocal;
 
     for (var x = 0; x < EXTERNAL_SOURCES.length; x++) {
       var source = EXTERNAL_SOURCES[x];
+
+      // Static months never touch SpreadsheetApp.openById at all - the order
+      // list and every Financial Overview number come straight from the
+      // embedded arrays/figures above, so there is no external file, ID or
+      // permission that can be wrong, unreachable, or point at the wrong
+      // project.
+      if (source.static) {
+        allSheetNames.push(source.name);
+        if (requestedMonth === source.name || (loadActiveOnly && source.name === activeSheetName)) {
+          allData = allData.concat(buildStaticLegacyOrders(source));
+        }
+        monthlyStats[source.name] = {
+          revenue: source.staticRevenue, balance: source.staticBalance,
+          buy: source.staticBuy, wgt: source.staticWgt, etc: source.staticEtc,
+          lost: 0, count: source.staticOrders.length
+        };
+        continue;
+      }
+
       try {
         var extSS = SpreadsheetApp.openById(source.id);
         var extSheet = extSS.getSheetByName(source.tabName);
@@ -1711,10 +1719,10 @@ var loadActiveOnly = !requestedMonth && !loadAllLocal;
           var cBuy = 0, cWgt = 0, cEtc = 0, extLost = 0;
           if (source.costBuyRange) cBuy = sumRange(extSheet, source.costBuyRange);
           else if (source.costBuyCell) cBuy = parseFloat(extSheet.getRange(source.costBuyCell).getValue()) || 0;
-          
+
           if (source.costWgtRange) cWgt = sumRange(extSheet, source.costWgtRange);
           else if (source.costWgtCell) cWgt = parseFloat(extSheet.getRange(source.costWgtCell).getValue()) || 0;
-          
+
           if (source.costEtcRange) cEtc = sumRange(extSheet, source.costEtcRange);
           else if (source.costEtcCell) cEtc = parseFloat(extSheet.getRange(source.costEtcCell).getValue()) || 0;
 
@@ -1723,24 +1731,10 @@ var loadActiveOnly = !requestedMonth && !loadAllLocal;
 
           var sheetCount = 0;
           if (requestedMonth === source.name || (loadActiveOnly && source.name === activeSheetName)) {
-   var extData;
-   if (source.legacyFormat === "name_price") {
-     extData = readLegacyNamePriceOrders(extSheet, source.name);
-   } else if (source.legacyFormat === "detailed") {
-     extData = readLegacyDetailedOrders(extSheet, source.name, source.legacyStartRow, source.legacyEndRow, !!source.legacyHasPics);
-   } else {
-     extData = readSheetData(extSheet, source.name);
-   }
-   allData = allData.concat(extData);
-   sheetCount = extData.length;
-} else if (source.legacyFormat === "name_price") {
-   // Cheap to run even when this isn't the month being viewed - a few
-   // columns, ~100 rows - so the count badge is always the real number
-   // instead of a hand-typed guess that goes stale the moment orders change.
-   sheetCount = readLegacyNamePriceOrders(extSheet, source.name).length;
-} else if (source.legacyFormat === "detailed") {
-   sheetCount = readLegacyDetailedOrders(extSheet, source.name, source.legacyStartRow, source.legacyEndRow, !!source.legacyHasPics).length;
-} else {
+            var extData = readSheetData(extSheet, source.name);
+            allData = allData.concat(extData);
+            sheetCount = extData.length;
+          } else {
              if (MANUAL_COUNTS[source.name]) { sheetCount = MANUAL_COUNTS[source.name];
              }
              else { sheetCount = (extRev > 0 || extBal > 0) ? 1 : 0; }
@@ -2456,6 +2450,7 @@ function deleteOrder(rowId, sheetName, linkedOrderIds) {
   
   if (!sheet) {
     for (var x = 0; x < EXTERNAL_SOURCES.length; x++) {
+      if (EXTERNAL_SOURCES[x].static) continue;
       if (EXTERNAL_SOURCES[x].name === sheetName) {
         try {
           var extSS = SpreadsheetApp.openById(EXTERNAL_SOURCES[x].id);
