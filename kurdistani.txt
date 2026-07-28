@@ -19,16 +19,52 @@ var MANUAL_COUNTS = {
 };
 
 // 1. EXTERNAL FILES
+// legacyFormat: true marks a month whose original file only ever recorded a
+// customer name (column A) and a price (column C) starting row 3, with no
+// Instagram, phone, place or per-order box/shipping breakdown - unlike the
+// modern sheet layout every other month uses. Those four other cell refs
+// (priceCell/balanceCell/costBuy.../costWgt.../costEtc...) still work for the
+// Financial Overview totals either way, since they just read one fixed cell
+// each; legacyFormat only changes how the individual order list is read.
 var EXTERNAL_SOURCES = [
-  { name: "April", id: "10ZwnwW8X_Y21i04fzYjlo0Aj52Jofb1VHAkVZv0M6Xk", tabName: "April", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59" },
-  { name: "May", id: "17W2qZNidwXX4ezubzyV4UzqGUY4BGNoL90pIbETz0Xw", tabName: "May", priceCell: "C93", balanceCell: "H93", costBuyRange: "D93:E93", costWgtCell: "F93", costEtcCell: "G93" },
-  { name: "Juni", id: "1gFcs7mZjPSWvmRtzkywTnwoDcdDgO5Sx_qbIxsUqstE", tabName: "Jun", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59" },
-  { name: "Julyi", id: "1rWH5fgATyzyWxH0-4s0xuCug_jXRXsabuOJl_ArUN4E", tabName: "Julyi", priceCell: "C90", balanceCell: "H90", costBuyRange: "D90:E90", costWgtCell: "F90", costEtcCell: "G90" },
-  { name: "Augi", id: "1DoUiIxB2mBp3KfWkPidwPzXdqmLRc6fj2wlRsR_xiXo", tabName: "Augs", priceCell: "C98", balanceCell: "H98", costBuyRange: "D98:E98", costWgtCell: "F98", costEtcCell: "G98" },
+  { name: "April", id: "10ZwnwW8X_Y21i04fzYjlo0Aj52Jofb1VHAkVZv0M6Xk", tabName: "April", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59", legacyFormat: true },
+  { name: "May", id: "17W2qZNidwXX4ezubzyV4UzqGUY4BGNoL90pIbETz0Xw", tabName: "May", priceCell: "C93", balanceCell: "H93", costBuyRange: "D93:E93", costWgtCell: "F93", costEtcCell: "G93", legacyFormat: true },
+  { name: "Juni", id: "1gFcs7mZjPSWvmRtzkywTnwoDcdDgO5Sx_qbIxsUqstE", tabName: "Jun", priceCell: "C59", balanceCell: "H59", costBuyRange: "D59:E59", costWgtCell: "F59", costEtcCell: "G59", legacyFormat: true },
+  { name: "Julyi", id: "1rWH5fgATyzyWxH0-4s0xuCug_jXRXsabuOJl_ArUN4E", tabName: "Julyi", priceCell: "C90", balanceCell: "H90", costBuyRange: "D90:E90", costWgtCell: "F90", costEtcCell: "G90", legacyFormat: true },
+  { name: "Augi", id: "1DoUiIxB2mBp3KfWkPidwPzXdqmLRc6fj2wlRsR_xiXo", tabName: "Augs", priceCell: "C98", balanceCell: "H98", costBuyRange: "D98:E98", costWgtCell: "F98", costEtcCell: "G98", legacyFormat: true },
   { name: "Sept", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "September", priceCell: "A157", balanceCell: "AA157", costBuyRange: "L157:Q157", costWgtRange: "R157:T157", costEtcRange: "X157:Z157" },
   { name: "Octo", id: "1BjByc7l4UwqUmd2XGvqitEex0k_8djE7o33afBZuB9E", tabName: "October", priceCell: "A137", balanceCell: "AA137", costBuyRange: "L137:Q137", costWgtRange: "R137:T137", costEtcRange: "X137:Z137" },
   { name: "Nove", id: "1vtdMAcs8pya4FcAL8DsqOnHtNX0kD_-Bfh4-5x2i34Q", tabName: "November", priceCell: "A150", balanceCell: "K150", costBuyCell: "F150", costWgtCell: "H150", costEtcCell: "J150" }
 ];
+
+// Reads a legacyFormat month: just name (A) and price (C) starting row 3,
+// through however many rows that sheet has. Every other order field comes
+// back blank/zero rather than guessed, and is_finished is set since these are
+// closed historical records - not meant to be edited from the app.
+function readLegacyNamePriceOrders(sheet, sheetName) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 3) return [];
+  var values = sheet.getRange(3, 1, lastRow - 2, 3).getValues();
+  var jsonData = [];
+  for (var i = 0; i < values.length; i++) {
+    var name = (values[i][0] || "").toString().trim();
+    if (!name) continue;
+    var rowNum = i + 3;
+    var price = parseFloat((values[i][2] || "").toString().replace(/,/g, "")) || 0;
+    jsonData.push({
+      insta: "", name: name, place: "", fib: "", price: price,
+      box_cost: "", pics_text: "", shipping_cost: "", phone: "",
+      box_name: "", lost: "", profit: "",
+      extra: "", note: "", link: "", initial_payment: 0,
+      date: "", orderNo: "Pending", trackNo: "",
+      warningBase64: "", warningImageUrl: "", warning_url: "",
+      image_url: "", proof_urls: [], primary_urls: "",
+      unique_order_id: "", admin_name: "", admin_role: "",
+      id: rowNum, sheet_name: sheetName, is_finished: true, linkedOrderIds: []
+    });
+  }
+  return jsonData;
+}
 
 // 2. LOCAL SHEETS
 var LOCAL_SHEETS = ["Dece", "Jan", "Feb", "March", "Apr", "Mayy", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1651,7 +1687,9 @@ var loadActiveOnly = !requestedMonth && !loadAllLocal;
 
           var sheetCount = 0;
           if (requestedMonth === source.name || (loadActiveOnly && source.name === activeSheetName)) {
-   var extData = readSheetData(extSheet, source.name);
+   var extData = source.legacyFormat
+     ? readLegacyNamePriceOrders(extSheet, source.name)
+     : readSheetData(extSheet, source.name);
    allData = allData.concat(extData);
    sheetCount = extData.length;
 } else {
