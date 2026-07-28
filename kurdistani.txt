@@ -13,9 +13,13 @@
 var ACTIVE_SHEET_NAME = "July";
 
 // *** MANUAL COUNTS FOR PAST MONTHS ***
+// April/May/Juni/Julyi/Augi/Sept/Octo used to be guessed numbers here because
+// actually reading their orders was never wired up. Now that they have a real
+// reader (legacyFormat below) that's cheap to run - a handful of columns,
+// ~100-120 rows - the count comes from actually reading the sheet every time,
+// live, instead of a number someone typed in once that quietly went stale.
 var MANUAL_COUNTS = {
-  "Jan": 197, "Dece": 130, "Sept": 112, "Octo": 105, "Nove": 112,
-  "April": 58, "May": 76, "Juni": 24, "Julyi": 61, "Augi": 73
+  "Jan": 197, "Dece": 130, "Nove": 112
 };
 
 // 1. EXTERNAL FILES
@@ -1729,9 +1733,16 @@ var loadActiveOnly = !requestedMonth && !loadAllLocal;
    }
    allData = allData.concat(extData);
    sheetCount = extData.length;
+} else if (source.legacyFormat === "name_price") {
+   // Cheap to run even when this isn't the month being viewed - a few
+   // columns, ~100 rows - so the count badge is always the real number
+   // instead of a hand-typed guess that goes stale the moment orders change.
+   sheetCount = readLegacyNamePriceOrders(extSheet, source.name).length;
+} else if (source.legacyFormat === "detailed") {
+   sheetCount = readLegacyDetailedOrders(extSheet, source.name, source.legacyStartRow, source.legacyEndRow, !!source.legacyHasPics).length;
 } else {
              if (MANUAL_COUNTS[source.name]) { sheetCount = MANUAL_COUNTS[source.name];
-             } 
+             }
              else { sheetCount = (extRev > 0 || extBal > 0) ? 1 : 0; }
           }
           monthlyStats[source.name] = { revenue: extRev, balance: extBal, buy: cBuy, wgt: cWgt, etc: cEtc, lost: extLost, count: sheetCount };
