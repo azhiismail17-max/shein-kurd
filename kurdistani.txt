@@ -1251,15 +1251,19 @@ if (data.action === "track_order") {
     if (data.action === "update_proof_picture" && data.row_id) {
        var ss = SpreadsheetApp.getActiveSpreadsheet();
        var sheet = ss.getSheetByName(sheetName);
-       if (sheet) {
-           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
-           if (data.image_url) {
-               sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); // W (23)
-               sheet.getRange(parseInt(data.row_id), 24).setValue(data.image_url); // X (24)
-           } else {
-               sheet.getRange(parseInt(data.row_id), 23).clearContent(); // Safely clear W (23)
-               sheet.getRange(parseInt(data.row_id), 24).clearContent(); // Safely clear X (24)
-           }
+       if (!sheet) {
+         return ContentService.createTextOutput(JSON.stringify({
+           status: "error",
+           message: "Could not find sheet " + sheetName + " to save the proof picture."
+         })).setMimeType(ContentService.MimeType.JSON);
+       }
+       if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
+       if (data.image_url) {
+           sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); // W (23)
+           sheet.getRange(parseInt(data.row_id), 24).setValue(data.image_url); // X (24)
+       } else {
+           sheet.getRange(parseInt(data.row_id), 23).clearContent(); // Safely clear W (23)
+           sheet.getRange(parseInt(data.row_id), 24).clearContent(); // Safely clear X (24)
        }
        return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
     }
@@ -1268,13 +1272,23 @@ if (data.action === "track_order") {
        var ss = SpreadsheetApp.getActiveSpreadsheet();
        var sheet = ss.getSheetByName(sheetName);
        var warningUrl = data.image_url ? data.image_url.toString().trim() : "";
-       if (sheet) {
-           if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
-           if (warningUrl) {
-               sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + warningUrl.replace(/"/g, '""') + '")'); // Y (25)
-           } else {
-               sheet.getRange(parseInt(data.row_id), 25).clearContent(); // Safely clear warning image
-           }
+       // A warning picture only helps other admins/moderators once it is
+       // actually on the sheet - answering "success" here when the sheet or
+       // row could not be found used to look identical to a real save from
+       // the client's side, so a picture could silently never leave the
+       // uploader's own device. Anything that stops the write now answers
+       // with an explicit error instead.
+       if (!sheet) {
+         return ContentService.createTextOutput(JSON.stringify({
+           status: "error",
+           message: "Could not find sheet " + sheetName + " to save the warning picture."
+         })).setMimeType(ContentService.MimeType.JSON);
+       }
+       if (isFinishedRow(sheet, data.row_id)) return lockedResponse(data.row_id);
+       if (warningUrl) {
+           sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + warningUrl.replace(/"/g, '""') + '")'); // Y (25)
+       } else {
+           sheet.getRange(parseInt(data.row_id), 25).clearContent(); // Safely clear warning image
        }
        return ContentService.createTextOutput(JSON.stringify({
          status: "success",

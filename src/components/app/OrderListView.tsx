@@ -34,6 +34,7 @@ import {
   Image as ImageIcon,
   Scan,
 } from "lucide-react";
+import { toast } from "sonner";
 import MonthSelector from "./MonthSelector";
 import { SkuSearch } from "./SkuSearch";
 import {
@@ -606,7 +607,35 @@ const OrderListView: React.FC<OrderListViewProps> = ({
     }
   };
 
-  const toggleMissing = (
+  // The picture only exists for other admins/moderators once the sheet
+  // actually has it - the local optimistic update and the missingImages
+  // cache only make it feel saved on this device. Apps Script answering
+  // {status:"success"} used to be trusted blindly, but a since-fixed bug
+  // there could return success while writing nothing; verifying the sheet
+  // actually echoes the URL back means a silent failure surfaces here
+  // instead of looking saved forever on just the uploader's phone.
+  const saveWarningPicture = async (order: Order, imageUrl: string): Promise<boolean> => {
+    try {
+      const res = await fetchWithRetry(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update_warning_picture",
+          row_id: order.id,
+          sheet_name: order.sheet_name,
+          image_url: imageUrl,
+        }),
+      });
+      const result = JSON.parse(await res.text());
+      if (result?.status !== "success") return false;
+      if (imageUrl && !String(result?.warningImageUrl || result?.warningBase64 || "").trim())
+        return false;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const toggleMissing = async (
     order: Order,
     key: string,
     isMissing: boolean,
@@ -633,15 +662,9 @@ const OrderListView: React.FC<OrderListViewProps> = ({
         });
       }
 
-      fetchWithRetry(SCRIPT_URL, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "update_warning_picture",
-          row_id: order.id,
-          sheet_name: order.sheet_name,
-          image_url: "",
-        }),
-      }).catch(() => {});
+      saveWarningPicture(order, "").then((ok) => {
+        if (!ok) toast.error("Could not clear the warning picture. Please try again.");
+      });
 
       // Remove the original warning notification globally
       fetchWithRetry(SCRIPT_URL, {
@@ -661,6 +684,31 @@ const OrderListView: React.FC<OrderListViewProps> = ({
           warningBase64: warningImageUrl,
         });
       }
+
+      const saved = await saveWarningPicture(order, warningImageUrl);
+      if (!saved) {
+        // Roll back the optimistic state - showing it as saved here while the
+        // sheet never got it is exactly the bug this is fixing.
+        const rolledBack = new Set(missingOrders);
+        rolledBack.delete(key);
+        setMissingOrders(rolledBack);
+        saveMissingSet(rolledBack);
+        const rolledBackImages = { ...missingImages };
+        delete rolledBackImages[key];
+        setMissingImages(rolledBackImages);
+        saveMissingImages(rolledBackImages);
+        if (onUpdateOrder) {
+          onUpdateOrder(order.id, order.sheet_name, {
+            warningImageUrl: undefined,
+            warningBase64: undefined,
+          });
+        }
+        toast.error("Warning picture was not saved", {
+          description: "The sheet didn't confirm it - other admins would never see it. Try again.",
+        });
+        return;
+      }
+
       sendNotification(
         "warning",
         `WARNING added to order: ${order.name || order.insta}. Please check!`,
@@ -668,16 +716,6 @@ const OrderListView: React.FC<OrderListViewProps> = ({
         order,
         true,
       );
-
-      fetchWithRetry(SCRIPT_URL, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "update_warning_picture",
-          row_id: order.id,
-          sheet_name: order.sheet_name,
-          image_url: warningImageUrl,
-        }),
-      }).catch(() => {});
     }
 
     fetchWithRetry(SCRIPT_URL, {
@@ -705,7 +743,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
       const newImages = { ...missingImages, [pendingMissingKey]: url };
       setMissingImages(newImages);
       saveMissingImages(newImages);
-      toggleMissing(pendingMissingOrder, pendingMissingKey, true, url);
+      await toggleMissing(pendingMissingOrder, pendingMissingKey, true, url);
     } catch (err) {
       alert("Failed to upload missing image");
     } finally {

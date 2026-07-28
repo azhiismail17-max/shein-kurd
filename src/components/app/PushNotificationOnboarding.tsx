@@ -24,10 +24,11 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
 
   const deviceState = useMemo(() => {
     if (typeof window === "undefined") {
-      return { supported: false, needsIosInstall: false, blocked: false };
+      return { supported: false, needsIosInstall: false, blocked: false, isMobile: false };
     }
 
     const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isMobile = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
@@ -36,19 +37,24 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
         "Notification" in window && "PushManager" in window && "serviceWorker" in navigator,
       needsIosInstall: isIos && !isStandalone,
       blocked: "Notification" in window && Notification.permission === "denied",
+      isMobile,
     };
   }, []);
 
   // Owner and admin cannot use the system without granting real push
   // permission - there is no dismiss path here by design, only the iPhone
   // install instructions for the one case where the browser can't even ask.
+  // Desktop/computer browsers are exempt entirely: this is a phone-push
+  // feature, and gating a computer behind it locks owners out of their own
+  // desk tool over a permission that was never meant for that device.
   useEffect(() => {
+    if (!deviceState.isMobile) return;
     if (!canRoleUsePush(role)) return;
     if (localStorage.getItem(ENABLED_KEY) === "true") return;
 
     const timer = window.setTimeout(() => setIsOpen(true), 650);
     return () => window.clearTimeout(timer);
-  }, [role]);
+  }, [role, deviceState.isMobile]);
 
   useEffect(() => {
     const handleEnabled = () => setIsOpen(false);
@@ -110,7 +116,7 @@ const PushNotificationOnboarding: React.FC<PushNotificationOnboardingProps> = ({
     setError(result.reason);
   };
 
-  if (!isOpen || !canRoleUsePush(role)) return null;
+  if (!isOpen || !canRoleUsePush(role) || !deviceState.isMobile) return null;
 
   return (
     <div

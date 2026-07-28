@@ -762,18 +762,22 @@ function doPost(e) {
     if (data.action === "update_proof_picture" && data.row_id) { //
        var ss = SpreadsheetApp.getActiveSpreadsheet(); //
        var sheet = ss.getSheetByName(sheetName); //
-       if (sheet) { //
-           if (data.image_url) { //
-               sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); //
-               // W (23)
-               sheet.getRange(parseInt(data.row_id), 24).setValue(data.image_url); //
-               // X (24)
-           } else { //
-               sheet.getRange(parseInt(data.row_id), 23).clearContent(); //
-               // Safely clear W (23)
-               sheet.getRange(parseInt(data.row_id), 24).clearContent(); //
-               // Safely clear X (24)
-           }
+       if (!sheet) {
+         return ContentService.createTextOutput(JSON.stringify({
+           status: "error",
+           message: "Could not find sheet " + sheetName + " to save the proof picture."
+         })).setMimeType(ContentService.MimeType.JSON);
+       }
+       if (data.image_url) { //
+           sheet.getRange(parseInt(data.row_id), 23).setFormula('=IMAGE("' + data.image_url.split(",")[0] + '")'); //
+           // W (23)
+           sheet.getRange(parseInt(data.row_id), 24).setValue(data.image_url); //
+           // X (24)
+       } else { //
+           sheet.getRange(parseInt(data.row_id), 23).clearContent(); //
+           // Safely clear W (23)
+           sheet.getRange(parseInt(data.row_id), 24).clearContent(); //
+           // Safely clear X (24)
        }
        return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
     }
@@ -781,16 +785,30 @@ function doPost(e) {
     if (data.action === "update_warning_picture" && data.row_id !== undefined) { //
        var ss = SpreadsheetApp.getActiveSpreadsheet(); //
        var sheet = ss.getSheetByName(sheetName); //
-       if (sheet) { //
-           if (data.image_url) { //
-               sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + data.image_url + '")'); //
-               // Y (25)
-           } else { //
-               sheet.getRange(parseInt(data.row_id), 25).clearContent(); //
-               // Safely clear warning image
-           }
+       var warningUrl = data.image_url ? data.image_url.toString().trim() : ""; //
+       // A warning picture only helps other admins/moderators once it is
+       // actually on the sheet - answering "success" when the sheet could
+       // not be found used to look identical to a real save from the
+       // client's side, so a picture could silently never leave the
+       // uploader's own device.
+       if (!sheet) {
+         return ContentService.createTextOutput(JSON.stringify({
+           status: "error",
+           message: "Could not find sheet " + sheetName + " to save the warning picture."
+         })).setMimeType(ContentService.MimeType.JSON);
        }
-       return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON); //
+       if (warningUrl) { //
+           sheet.getRange(parseInt(data.row_id), 25).setFormula('=IMAGE("' + warningUrl.replace(/"/g, '""') + '")'); //
+           // Y (25)
+       } else { //
+           sheet.getRange(parseInt(data.row_id), 25).clearContent(); //
+           // Safely clear warning image
+       }
+       return ContentService.createTextOutput(JSON.stringify({
+         status: "success",
+         warningBase64: warningUrl,
+         warningImageUrl: warningUrl
+       })).setMimeType(ContentService.MimeType.JSON); //
     }
 
     if (data.action === "update_primary_picture" && data.row_id && data.primary_urls) { //
