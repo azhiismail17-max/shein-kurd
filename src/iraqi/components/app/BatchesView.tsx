@@ -69,7 +69,11 @@ interface Props {
   activeYear: string;
   setActiveYear: (y: string) => void;
   onRefresh: () => void;
-  onStatusChange: (order: Order, status: string) => void | Promise<void>;
+  onStatusChange: (
+    order: Order,
+    status: string,
+    options?: { silent?: boolean },
+  ) => void | Promise<void>;
   onUpdateOrder: (id: string | number, sheet: string, updates: Partial<Order>) => void;
 }
 
@@ -1171,18 +1175,34 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       const status = newStatus as BoxGroup["status"];
       setIsSyncing(true);
       try {
+        const ordersToUpdate = box.orders.filter((order) => !order.is_finished);
+        // Each order's own notification is muted here - marking a whole box as
+        // arrived/purchased would otherwise fire one phone notification per
+        // order in it. One box-level notification below says the same thing.
         await Promise.all(
-          box.orders
-            .filter((order) => !order.is_finished)
-            .map((order) => onStatusChange(order, status)),
+          ordersToUpdate.map((order) => onStatusChange(order, status, { silent: true })),
         );
+
+        if (ordersToUpdate.length > 0 && (status === "arrived" || status === "purchased")) {
+          const actor = localStorage.getItem("auth_username") || role || "admin";
+          const verb = status === "arrived" ? "arrived/delivered" : "purchased";
+          const boxNotificationTargets = getOtherBoxLinkTargets(role);
+          sendNotification(
+            status === "arrived" ? "deliver" : "approve",
+            `${ordersToUpdate.length} order${ordersToUpdate.length === 1 ? "" : "s"} ${verb} in ${box.box_name} by ${actor}.`,
+            role ?? null,
+            undefined,
+            false,
+            boxNotificationTargets,
+          ).catch((error) => console.error("Box status notification failed", error));
+        }
       } catch (e) {
         console.error(e);
       } finally {
         setIsSyncing(false);
       }
     },
-    [onStatusChange, preserveBatchPosition],
+    [onStatusChange, preserveBatchPosition, role],
   );
 
   const handleSaveField = useCallback(

@@ -293,16 +293,6 @@ const OrderDetailModal: React.FC<Props> = ({
       });
       order.primary_urls = merged; // eagerly update
       if (onUpdateOrder) onUpdateOrder(order.id, order.sheet_name, { primary_urls: merged });
-
-      const role = localStorage.getItem("iraqi_auth_role") || "unknown";
-      const { sendNotification } = await import("@/iraqi/lib/notifications");
-      sendNotification(
-        "custom",
-        `Picture added to order: ${order.name || order.insta}.`,
-        role,
-        order,
-        true,
-      );
     } catch (err) {
       alert("Failed to upload primary image");
     } finally {
@@ -355,16 +345,6 @@ const OrderDetailModal: React.FC<Props> = ({
       if (onUpdateOrder) {
         onUpdateOrder(order.id, order.sheet_name, { image_url: lastUrl, proof_urls: newUrls });
       }
-
-      const role = localStorage.getItem("iraqi_auth_role") || "unknown";
-      const { sendNotification } = await import("@/iraqi/lib/notifications");
-      sendNotification(
-        "custom",
-        `Picture added to order: ${order.name || order.insta}.`,
-        role,
-        order,
-        true,
-      );
     } catch (err) {
       alert("Failed to upload proof image");
     } finally {

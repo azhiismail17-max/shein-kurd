@@ -857,7 +857,7 @@ const Index: React.FC = () => {
   }, []);
 
   const handleStatusChange = useCallback(
-    async (order: Order, newStatus: string) => {
+    async (order: Order, newStatus: string, options?: { silent?: boolean }) => {
       if (order.is_finished) return;
       const newExtra = buildStatusExtra(order.extra, newStatus);
       // Optimistic update
@@ -866,15 +866,24 @@ const Index: React.FC = () => {
         status: newStatus as Order["status"],
       });
 
-      if (newStatus === "DELIVERY_SCANNED" || newStatus === "arrived") {
-        sendNotification(
-          "deliver",
-          `Order arrived/delivered: ${order.name || order.insta}`,
-          role,
-          order,
-        );
-      } else if (newStatus === "purchased") {
-        sendNotification("approve", `Order purchased: ${order.name || order.insta}`, role, order);
+      // Silent when a whole box is being updated at once - the caller sends one
+      // box-level notification instead of one per order.
+      if (!options?.silent) {
+        if (newStatus === "DELIVERY_SCANNED" || newStatus === "arrived") {
+          sendNotification(
+            "deliver",
+            `Order arrived/delivered: ${order.name || order.insta}`,
+            role,
+            order,
+          );
+        } else if (newStatus === "purchased") {
+          sendNotification(
+            "approve",
+            `Order purchased: ${order.name || order.insta}`,
+            role,
+            order,
+          );
+        }
       }
 
       // Fire request then refresh
