@@ -234,6 +234,25 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
     return unique;
   };
 
+  // Same cross-reference the API-result cards use, but for a code read straight
+  // off a label by the camera: which box(es) actually hold this product. Scoped
+  // to scopedOrders, so a box already selected here also narrows what the live
+  // scanner shows - selecting Box 120 first means only Box 120's matches count.
+  const matchOwnerBoxes = (owner: { sku?: string; link?: string }, code: string): string[] => {
+    const signals = getProductSignals({
+      identifierSources: [code, owner.sku],
+      link: owner.link,
+    });
+    const boxes = new Set<string>();
+    for (const prepared of scopedOrders) {
+      if (scoreOrderAgainstProduct(prepared, signals) > 0) {
+        const box = getOrderBoxName(prepared.order) || prepared.order.box_name;
+        if (box) boxes.add(String(box));
+      }
+    }
+    return [...boxes];
+  };
+
   const visibleApiResults = apiResults
     .map((result) => ({
       result,
@@ -642,6 +661,10 @@ export function FastSkuSearch<T extends SkuSearchOrder>({
               onScan={handleScannedText}
               onClose={() => setIsScannerOpen(false)}
               maxDigits={PIN_MAX_DIGITS}
+              boxOptions={boxOptions}
+              selectedBox={selectedBox}
+              onSelectedBoxChange={setSelectedBox}
+              matchOwnerBoxes={matchOwnerBoxes}
             />
           )}
         </>

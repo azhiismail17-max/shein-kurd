@@ -21,6 +21,13 @@ interface SkuNumberScannerProps {
   onScan: (digits: string) => void;
   onClose: () => void;
   maxDigits?: number;
+  /** Boxes to choose from, so scanning can be scoped to the one being packed. */
+  boxOptions?: string[];
+  selectedBox?: string;
+  onSelectedBoxChange?: (box: string) => void;
+  /** Which box(es) a found owner's product actually sits in, already scoped to
+   * whatever box is selected - empty means "not in the selected box". */
+  matchOwnerBoxes?: (owner: SkuLookupResult, code: string) => string[];
 }
 
 // Gap between reads. The read itself takes longer than this, so it only controls
@@ -31,15 +38,31 @@ const SCAN_INTERVAL_MS = 90;
 // more time than one extra frame does.
 const TRUSTED_CONFIDENCE = 70;
 
+interface OwnerHit {
+  owner: SkuLookupResult;
+  /** Raw box label(s) this owner's product was found in, already scoped to
+   * whatever box is selected. Empty means it exists but not in that box. */
+  boxes: string[];
+}
+
 interface ScanHit {
   code: string;
-  owners: SkuLookupResult[];
+  owners: OwnerHit[];
+  /** How many owners this code had before the selected box narrowed them down,
+   * so "found, but not here" can be told apart from "not found at all". */
+  totalOwners: number;
 }
+
+const formatBoxLabel = (box: string) => `Box ${String(box).replace(/^box[\s-]*/i, "")}`;
 
 export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
   onScan,
   onClose,
   maxDigits = 7,
+  boxOptions = [],
+  selectedBox = "",
+  onSelectedBoxChange,
+  matchOwnerBoxes,
 }) => {
   const [cameraError, setCameraError] = useState("");
   const [status, setStatus] = useState("Starting camera...");
@@ -67,6 +90,16 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
   const seenRef = useRef(new Map<string, number>());
   const fruitlessRef = useRef(new Set<string>());
   const biasCycleRef = useRef(0);
+  // Read fresh on every scan without being a dependency of handleFound/readOnce -
+  // those feed the camera-lifecycle effect, and a new function identity on every
+  // parent render (matchOwnerBoxes is recreated each render of FastSkuSearch)
+  // would restart the camera stream on every keystroke elsewhere in that screen.
+  const matchOwnerBoxesRef = useRef(matchOwnerBoxes);
+  const selectedBoxRef = useRef(selectedBox);
+  useEffect(() => {
+    matchOwnerBoxesRef.current = matchOwnerBoxes;
+    selectedBoxRef.current = selectedBox;
+  }, [matchOwnerBoxes, selectedBox]);
 
   const stopCamera = useCallback(() => {
     stoppedRef.current = true;
@@ -87,12 +120,28 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
     setPreview(digits);
     setStatus("Looking up...");
     const { results } = await lookupSku(digits);
-    const found: ScanHit = { code: digits, owners: results };
+    const matchBoxes = matchOwnerBoxesRef.current;
+    const boxScope = selectedBoxRef.current;
+    const withBoxes: OwnerHit[] = results.map((owner) => ({
+      owner,
+      boxes: matchBoxes ? matchBoxes(owner, digits) : [],
+    }));
+    // A box is selected: only an owner actually tied to that box belongs on
+    // screen, otherwise scanning inside Box 120 would keep surfacing every
+    // other box's customers for the same product.
+    const owners = boxScope ? withBoxes.filter((entry) => entry.boxes.length > 0) : withBoxes;
+    const found: ScanHit = { code: digits, owners, totalOwners: results.length };
     setHit(found);
     setHistory((previous) =>
       [found, ...previous.filter((item) => item.code !== digits)].slice(0, 8),
     );
-    setStatus(results.length > 0 ? "Found" : "Not in the list");
+    setStatus(
+      owners.length > 0
+        ? "Found"
+        : boxScope && results.length > 0
+          ? `Not in ${formatBoxLabel(boxScope)}`
+          : "Not in the list",
+    );
   }, []);
 
   const scanNext = useCallback(() => {
@@ -375,6 +424,24 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
           </div>
         </div>
 
+        {boxOptions.length > 0 && (
+          <div className="border-b border-border px-4 py-2">
+            <select
+              value={selectedBox}
+              onChange={(event) => onSelectedBoxChange?.(event.target.value)}
+              className="w-full rounded-lg border border-border bg-secondary px-2.5 py-1.5 text-xs font-semibold text-foreground focus:border-primary/50 focus:outline-none"
+              aria-label="Scan only for this box"
+            >
+              <option value="">Scanning: all boxes</option>
+              {boxOptions.map((box) => (
+                <option key={box} value={box}>
+                  Scanning: {formatBoxLabel(box)} only
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="relative aspect-[4/3] overflow-hidden bg-black">
           <video
             ref={videoRef}
@@ -432,29 +499,34 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
                   <div className="text-[11px] font-semibold opacity-75">
                     {hit.owners.length > 0
                       ? `${hit.owners.length} customer${hit.owners.length === 1 ? "" : "s"}`
-                      : "No customer has this code"}
+                      : selectedBox && hit.totalOwners > 0
+                        ? `Found, but not in ${formatBoxLabel(selectedBox)}`
+                        : "No customer has this code"}
                   </div>
                 </div>
               </div>
 
               <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-                {hit.owners.map((owner, index) => (
+                {hit.owners.map((entry, index) => (
                   <div
-                    key={`${owner.name}-${index}`}
+                    key={`${entry.owner.name}-${index}`}
                     className="flex items-center gap-2 rounded-lg bg-white/10 px-2.5 py-2"
                   >
                     <User size={15} className="shrink-0 opacity-70" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-bold">
-                        @{String(owner.name || "Unknown")}
+                        @{String(entry.owner.name || "Unknown")}
                       </span>
                       <span className="block text-[11px] opacity-70">
-                        {owner.pcs ? `${owner.pcs} pieces` : "quantity unknown"}
+                        {entry.owner.pcs ? `${entry.owner.pcs} pieces` : "quantity unknown"}
+                        {entry.boxes.length > 0
+                          ? ` · 📦 ${entry.boxes.map(formatBoxLabel).join(", ")}`
+                          : ""}
                       </span>
                     </span>
-                    {owner.link ? (
+                    {entry.owner.link ? (
                       <a
-                        href={String(owner.link)}
+                        href={String(entry.owner.link)}
                         target="_blank"
                         rel="noreferrer"
                         className="shrink-0 rounded-md bg-white/15 p-1.5 hover:bg-white/25"
@@ -467,8 +539,9 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
                 ))}
                 {hit.owners.length === 0 && (
                   <p className="rounded-lg bg-white/10 px-2.5 py-2 text-xs leading-5 opacity-80">
-                    This code is not in the list yet. It arrives once the extractor bot has read
-                    that order.
+                    {selectedBox && hit.totalOwners > 0
+                      ? `This code belongs to ${hit.totalOwners} customer${hit.totalOwners === 1 ? "" : "s"}, but none in ${formatBoxLabel(selectedBox)}.`
+                      : "This code is not in the list yet. It arrives once the extractor bot has read that order."}
                   </p>
                 )}
               </div>
@@ -514,7 +587,7 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
                   <span className="font-mono font-bold tabular-nums">{item.code}</span>
                   <span className="min-w-0 flex-1 truncate text-right font-semibold text-muted-foreground">
                     {item.owners.length > 0
-                      ? item.owners.map((owner) => `@${owner.name}`).join(", ")
+                      ? item.owners.map((entry) => `@${entry.owner.name}`).join(", ")
                       : "not found"}
                   </span>
                 </div>
