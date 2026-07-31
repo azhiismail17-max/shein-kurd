@@ -10,10 +10,14 @@
 export const OCR_TARGET_WIDTH = 980;
 
 // The guide box, as a fraction of the video. Everything outside it is discarded
-// before OCR, which is both faster and keeps the barcode, the Chinese text and
-// the "Made in China" line from being read instead of the code. Shaped as a wide
-// band so the two printed code lines fill it when the label is squared up.
-export const GUIDE = { x: 0.04, y: 0.34, width: 0.92, height: 0.32 };
+// before OCR, which is both faster and keeps the barcode, the Chinese text, the
+// "Made in China" line, and the package-code line from being read instead of the
+// product code. Narrowed to one line's height on purpose: the box used to span
+// both printed code lines, which meant the digits stayed small in the frame and
+// pushed people to get uncomfortably close to the label, past where the camera
+// can still focus. A one-line box reads big enough at a normal distance -
+// camera zoom (in the scanner UI) is the way to fill it further, not proximity.
+export const GUIDE = { x: 0.08, y: 0.45, width: 0.84, height: 0.14 };
 
 export interface PreparedFrame {
   canvas: HTMLCanvasElement;

@@ -9,6 +9,8 @@ import {
   ScanText,
   User,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { getSkuOcrWorker, preloadSkuLabelReader, readProductNumber } from "./skuOcrWorker";
 import { GUIDE, buildOcrCanvas } from "@/lib/ocr-frame";
@@ -45,6 +47,12 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
   const [isReadingPhoto, setIsReadingPhoto] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
+  // Getting close enough to fill a small guide box by moving the phone runs
+  // straight into the lens's minimum focus distance and comes back blurred.
+  // Zooming instead keeps the phone at a distance it can actually focus at.
+  const [zoomAvailable, setZoomAvailable] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const zoomRangeRef = useRef<{ min: number; max: number; step: number } | null>(null);
   // The result being shown over the camera, and everything scanned so far.
   const [hit, setHit] = useState<ScanHit | null>(null);
   const [history, setHistory] = useState<ScanHit[]>([]);
@@ -202,8 +210,17 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
         }
 
         const [track] = stream.getVideoTracks();
-        const capabilities = track?.getCapabilities?.() as { torch?: boolean } | undefined;
+        const capabilities = track?.getCapabilities?.() as
+          | { torch?: boolean; zoom?: { min: number; max: number; step: number } }
+          | undefined;
         setTorchAvailable(Boolean(capabilities?.torch));
+
+        if (capabilities?.zoom && capabilities.zoom.max > capabilities.zoom.min) {
+          zoomRangeRef.current = capabilities.zoom;
+          setZoomAvailable(true);
+          const settings = track?.getSettings?.() as { zoom?: number } | undefined;
+          setZoom(settings?.zoom || capabilities.zoom.min);
+        }
 
         // Keep hunting for focus. A phone that locks focus on the bag behind the
         // label never resolves the print, however many frames are read.
@@ -252,6 +269,22 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
     }
   };
 
+  const changeZoom = async (delta: number) => {
+    const range = zoomRangeRef.current;
+    const [track] = streamRef.current?.getVideoTracks() || [];
+    if (!track || !range) return;
+    const next = Math.max(range.min, Math.min(range.max, zoom + delta));
+    if (next === zoom) return;
+    try {
+      await track.applyConstraints({
+        advanced: [{ zoom: next }],
+      } as unknown as MediaTrackConstraints);
+      setZoom(next);
+    } catch {
+      setZoomAvailable(false);
+    }
+  };
+
   const handlePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -297,6 +330,29 @@ export const SkuNumberScanner: React.FC<SkuNumberScannerProps> = ({
               <span className="mr-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
                 {history.length} scanned
               </span>
+            )}
+            {zoomAvailable && (
+              <div className="flex items-center gap-0.5 rounded-lg bg-secondary px-0.5 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => changeZoom(-(zoomRangeRef.current?.step || 0.5))}
+                  className="rounded-md p-1 text-muted-foreground hover:bg-card hover:text-foreground"
+                  aria-label="Zoom out"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <span className="w-8 text-center text-[10px] font-bold tabular-nums text-muted-foreground">
+                  {zoom.toFixed(1)}x
+                </span>
+                <button
+                  type="button"
+                  onClick={() => changeZoom(zoomRangeRef.current?.step || 0.5)}
+                  className="rounded-md p-1 text-muted-foreground hover:bg-card hover:text-foreground"
+                  aria-label="Zoom in"
+                >
+                  <ZoomIn size={15} />
+                </button>
+              </div>
             )}
             {torchAvailable && (
               <button
