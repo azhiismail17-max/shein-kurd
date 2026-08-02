@@ -1,0 +1,291 @@
+/**
+ * Masrufat (expenses) web app.
+ *
+ * Paste this into the Apps Script project behind
+ *   https://script.google.com/macros/s/AKfycbxH9QSkC7roqWQ-rkKXvdqXVeDywrMJYDzdvJtbYNAD_sNJykxSpCt2JiEyJ267rlyv/exec
+ * then Deploy -> Manage deployments -> edit the deployment -> Version: New version -> Deploy.
+ *
+ * The redeploy is the part people miss. /exec serves the *deployed* version, not the code
+ * you just saved, so saving alone changes nothing.
+ *
+ * Access must be "Anyone" (Deploy -> Manage deployments -> Who has access). With anything
+ * stricter, the app gets a sign-in page instead of a reply.
+ *
+ * HOW AN EXPENSE IS STORED
+ * One expense goes into one cell of the month's own column, in the first free row between
+ * 3 and 29. Row 30 is the month's total and is never written to.
+ *
+ * THE COLUMN IS WORKED OUT, NOT FIXED
+ * Row 2 of the sheet names every month, so the column is found by matching today's month
+ * against those names. That is what makes the turn of the month look after itself.
+ *
+ * WHICH COLUMN IS "THIS MONTH"
+ * Row 2 reads:  E=jan  F=Frb  G=April  H=May  I=Jun  J=July  K=Aug  L=Sep  M=Oct  N=Nov  O=Dec
+ * So J is July and K is August, not the other way round. The sheet itself agrees: J holds a
+ * full month of entries totalling 122,282, while K holds 2 entries and 11,907 — which is
+ * what a month that has only just begun looks like. An expense written into J would be
+ * added to July's total and leave both months wrong, so August resolves to K.
+ * If a column ever has to be forced by hand, set FORCE_COLUMN below.
+ */
+
+/** The tab holding the month-by-month grid. */
+var SHEET_NAME = 'masruf';
+
+/** Row 2 names the months. */
+var HEADER_ROW = 2;
+
+/** Expenses live between these rows. Row 30 is the total and is left alone. */
+var FIRST_ROW = 3;
+var LAST_ROW = 29;
+
+/**
+ * Set to something like 'J' to override the month lookup. Leave empty for normal use — an
+ * override left in place keeps writing into the same month once the month has turned.
+ */
+var FORCE_COLUMN = '';
+
+/**
+ * Only these columns are searched, so a month cannot land in the 2025 block.
+ *
+ * Columns A to D are September to December 2025 and share their names with L to O. Without
+ * this limit, "Sep" would match column A and the money would go into last year.
+ */
+var FIRST_MONTH_COLUMN = 5; // E
+var LAST_MONTH_COLUMN = 15; // O
+
+/** Sheet spellings, including the sheet's own 'Frb' for February. */
+var MONTH_ALIASES = {
+  0: ['jan', 'january'],
+  1: ['frb', 'feb', 'february'],
+  2: ['mar', 'march'],
+  3: ['apr', 'april'],
+  4: ['may', 'mayy'],
+  5: ['jun', 'june'],
+  6: ['jul', 'july', 'julyi'],
+  7: ['aug', 'august', 'augi'],
+  8: ['sep', 'sept', 'september'],
+  9: ['oct', 'octo', 'october'],
+  10: ['nov', 'nove', 'november'],
+  11: ['dec', 'dece', 'december']
+};
+
+function sheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    throw new Error(
+      "Sheet '" + SHEET_NAME + "' not found. Check SHEET_NAME matches the tab name exactly."
+    );
+  }
+  return sheet;
+}
+
+function json_(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
+
+function columnLetter_(index) {
+  var name = '';
+  var n = index;
+  while (n > 0) {
+    var rest = (n - 1) % 26;
+    name = String.fromCharCode(65 + rest) + name;
+    n = Math.floor((n - rest - 1) / 26);
+  }
+  return name;
+}
+
+function columnIndex_(letter) {
+  var text = String(letter || '').toUpperCase();
+  var n = 0;
+  for (var i = 0; i < text.length; i++) {
+    n = n * 26 + (text.charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+/**
+ * The column for a month, found by reading the header row.
+ *
+ * Returns 0 when the sheet has no column for it — March has none, for instance. A clear
+ * refusal is far better than money written into whichever column happened to be nearby.
+ */
+function monthColumn_(sheet, monthIndex) {
+  if (FORCE_COLUMN) return columnIndex_(FORCE_COLUMN);
+
+  var width = Math.min(LAST_MONTH_COLUMN, sheet.getLastColumn());
+  if (width < FIRST_MONTH_COLUMN) return 0;
+
+  var headers = sheet
+    .getRange(HEADER_ROW, FIRST_MONTH_COLUMN, 1, width - FIRST_MONTH_COLUMN + 1)
+    .getValues()[0];
+  var names = MONTH_ALIASES[monthIndex] || [];
+
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i] || '')
+      .trim()
+      .toLowerCase();
+    if (!header) continue;
+    for (var j = 0; j < names.length; j++) {
+      if (header === names[j]) return FIRST_MONTH_COLUMN + i;
+    }
+  }
+  return 0;
+}
+
+/** The first free row in a column, or 0 when all 27 places are taken. */
+function firstFreeRow_(sheet, column) {
+  var values = sheet.getRange(FIRST_ROW, column, LAST_ROW - FIRST_ROW + 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim() === '') return FIRST_ROW + i;
+  }
+  return 0;
+}
+
+/** "K5" -> { column: 11, row: 5 }, or null when it is not a cell inside the grid. */
+function parseCell_(text) {
+  var match = String(text || '')
+    .trim()
+    .toUpperCase()
+    .match(/^([A-Z]{1,2})(\d{1,3})$/);
+  if (!match) return null;
+  var column = columnIndex_(match[1]);
+  var row = Number(match[2]);
+  if (row < FIRST_ROW || row > LAST_ROW) return null;
+  if (column < FIRST_MONTH_COLUMN || column > LAST_MONTH_COLUMN) return null;
+  return { column: column, row: row };
+}
+
+/**
+ * Lists what is recorded, so the app can show it and edit it.
+ *
+ * Each entry's id is its cell — "K5" — and that is what an edit is aimed at. Pass
+ * ?month=all for every month, or nothing for the month in progress.
+ */
+function doGet(e) {
+  try {
+    var sheet = sheet_();
+    var p = (e && e.parameter) || {};
+    var wantAll = String(p.month || '').toLowerCase() === 'all';
+
+    var columns = [];
+    if (wantAll) {
+      for (var c = FIRST_MONTH_COLUMN; c <= LAST_MONTH_COLUMN; c++) columns.push(c);
+    } else {
+      var current = monthColumn_(sheet, new Date().getMonth());
+      if (!current) {
+        return json_({
+          status: 'error',
+          message: 'row ' + HEADER_ROW + ' has no column for this month'
+        });
+      }
+      columns.push(current);
+    }
+
+    var headers = sheet.getRange(HEADER_ROW, 1, 1, LAST_MONTH_COLUMN).getValues()[0];
+    var expenses = [];
+
+    for (var k = 0; k < columns.length; k++) {
+      var column = columns[k];
+      var values = sheet.getRange(FIRST_ROW, column, LAST_ROW - FIRST_ROW + 1, 1).getValues();
+      for (var i = 0; i < values.length; i++) {
+        var raw = String(values[i][0]).trim();
+        if (!raw) continue;
+        var amount = Number(raw.replace(/[^0-9.\-]/g, ''));
+        if (!isFinite(amount) || amount === 0) continue;
+        expenses.push({
+          id: columnLetter_(column) + (FIRST_ROW + i),
+          amount: amount,
+          month: String(headers[column - 1] || ''),
+          // The grid holds amounts only. There is no date or time anywhere in it.
+          date: '',
+          system: '',
+          note: ''
+        });
+      }
+    }
+    return json_({ status: 'success', expenses: expenses });
+  } catch (err) {
+    return json_({ status: 'error', message: String(err) });
+  }
+}
+
+/**
+ * Records or changes one expense.
+ *
+ * action = 'add'     puts the amount in the first free cell of this month's column
+ * action = 'update'  replaces the amount in the cell named by id, e.g. id=K5
+ *
+ * Every reply is JSON, so the app can tell saved from refused instead of assuming.
+ */
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    // Without the lock, two people submitting together can both be handed the same free
+    // row and the second write silently replaces the first.
+    lock.waitLock(20000);
+
+    var p = (e && e.parameter) || {};
+    var action = String(p.action || 'add').toLowerCase();
+    var sheet = sheet_();
+
+    var amount = Number(String(p.amount == null ? '' : p.amount).replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(amount) || amount <= 0) {
+      return json_({ status: 'error', message: 'amount must be a number greater than zero' });
+    }
+
+    if (action === 'update') {
+      var target = parseCell_(p.id);
+      if (!target) {
+        return json_({
+          status: 'error',
+          message: 'id must name a cell between row ' + FIRST_ROW + ' and ' + LAST_ROW + ', e.g. K5'
+        });
+      }
+      sheet.getRange(target.row, target.column).setValue(amount);
+      var cell = columnLetter_(target.column) + target.row;
+      return json_({ status: 'success', message: 'Updated ' + cell, id: cell, cell: cell });
+    }
+
+    var column = monthColumn_(sheet, new Date().getMonth());
+    if (!column) {
+      return json_({
+        status: 'error',
+        message:
+          'row ' + HEADER_ROW + ' has no column for this month, so there is nowhere safe to put it'
+      });
+    }
+
+    var row = firstFreeRow_(sheet, column);
+    if (!row) {
+      return json_({
+        status: 'error',
+        message:
+          'rows ' +
+          FIRST_ROW +
+          '-' +
+          LAST_ROW +
+          ' of column ' +
+          columnLetter_(column) +
+          ' are all full. Row 30 is the total and will not be used.'
+      });
+    }
+
+    sheet.getRange(row, column).setValue(amount);
+    var newCell = columnLetter_(column) + row;
+    return json_({
+      status: 'success',
+      message: 'Wrote ' + newCell,
+      id: newCell,
+      cell: newCell,
+      column: columnLetter_(column)
+    });
+  } catch (err) {
+    return json_({ status: 'error', message: String(err) });
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (ignore) {}
+  }
+}

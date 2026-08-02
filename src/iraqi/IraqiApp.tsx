@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { deleteOrderEverywhere } from "@/lib/submitOrder";
 import {
   Order,
   ApiResponse,
@@ -626,6 +627,23 @@ const Index: React.FC = () => {
       }
 
       try {
+        // Supabase first. Without this the row survived every delete made from the list,
+        // so a removed order still counted towards whoever created it.
+        const removed = await deleteOrderEverywhere("iraqi", {
+          unique_order_id: orderToDelete?.unique_order_id,
+          sheet_name: sheetName,
+          id,
+        });
+        if (!removed.ok) {
+          // Put the order back rather than leave the screen disagreeing with the database.
+          if (orderToDelete) setAllOrders((prev) => [...prev, orderToDelete]);
+          alert(removed.error || "Could not delete from the database. Nothing was removed.");
+          return;
+        }
+        if (removed.supabaseDeleted === 0) {
+          console.warn("[delete] no matching Supabase row; removing from the sheet only");
+        }
+
         await fetchWithRetry(SCRIPT_URL, {
           method: "POST",
           body: JSON.stringify({
@@ -779,12 +797,7 @@ const Index: React.FC = () => {
             order,
           );
         } else if (newStatus === "purchased") {
-          sendNotification(
-            "approve",
-            `Order purchased: ${order.name || order.insta}`,
-            role,
-            order,
-          );
+          sendNotification("approve", `Order purchased: ${order.name || order.insta}`, role, order);
         }
       }
 
@@ -992,6 +1005,7 @@ const Index: React.FC = () => {
           <DashboardView
             stats={monthlyStats[viewingMonth]}
             orders={viewingMonthOrders}
+            allOrders={allOrders}
             viewingMonth={viewingMonth}
             availableMonths={availableMonths}
             setViewingMonth={setViewingMonth}

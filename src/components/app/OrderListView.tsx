@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Order,
   SCRIPT_URL,
@@ -68,9 +68,11 @@ const getPrimaryImgs = (order: Order) =>
     });
 
 const getOrderSenderLabel = (order: Order) => {
-  const senderName = String(order.admin_name || "").trim();
+  // staff_name is the field going forward; admin_name is read as a fallback so
+  // orders created before the change still show who took them.
+  const senderName = String(order.staff_name || order.admin_name || "").trim();
   if (!senderName) return "";
-  const senderRole = String(order.admin_role || "").trim();
+  const senderRole = String(order.staff_role || order.admin_role || "").trim();
   return senderRole ? `${senderName} (${senderRole})` : senderName;
 };
 
@@ -210,6 +212,9 @@ interface OrderListViewProps {
   activeYear: string;
   setActiveYear: (y: string) => void;
   availableMonths: string[];
+  /** Months the list is limited to; more than one may be picked. */
+  selectedMonths?: string[];
+  onToggleMonth?: (month: string) => void;
   onStatusChange: (order: Order, status: string) => void;
   role?: string | null;
   onNewOrder?: () => void;
@@ -228,13 +233,17 @@ const OrderListView: React.FC<OrderListViewProps> = ({
   activeYear,
   setActiveYear,
   availableMonths,
+  selectedMonths,
+  onToggleMonth,
   onStatusChange,
   role,
   onNewOrder,
   isDeliveryTab,
   onUpdateOrder,
 }) => {
-  const canViewSubmittedBy = role === "owner" || role === "admin";
+  // Everyone sees who created an order. It was owner/admin only, which meant the
+  // staff who take the orders could not see their own name on them.
+  const canViewSubmittedBy = true;
   const [viewMode, setViewMode] = useState<"table" | "gallery">("table");
   const [generatingPdf, setGeneratingPdf] = useState<string | null>(null);
   const [verifiedOrders, setVerifiedOrders] = useState<Set<string>>(getVerifiedSet);
@@ -425,7 +434,14 @@ const OrderListView: React.FC<OrderListViewProps> = ({
     }
   };
 
-  const groupedOrders = useMemo(() => {
+  // Nothing here is virtualised, so every row a search matches becomes real DOM —
+  // a broad query across every month can match a thousand orders and stall the
+  // page. Rows are handed out a screenful at a time instead; filtering itself is
+  // about a millisecond, so the cost being avoided is purely rendering.
+  const ROWS_PER_PAGE = 60;
+  const [visibleCount, setVisibleCount] = useState(ROWS_PER_PAGE);
+
+  const allGroupedOrders = useMemo(() => {
     return orders.map((order) => {
       const key = `${order.id}-${order.sheet_name}`;
       return {
@@ -436,6 +452,17 @@ const OrderListView: React.FC<OrderListViewProps> = ({
       };
     });
   }, [orders]);
+
+  // A new search or month starts again from the first page.
+  useEffect(() => {
+    setVisibleCount(ROWS_PER_PAGE);
+  }, [orders]);
+
+  const groupedOrders = useMemo(
+    () => allGroupedOrders.slice(0, visibleCount),
+    [allGroupedOrders, visibleCount],
+  );
+  const hiddenCount = allGroupedOrders.length - groupedOrders.length;
 
   const toggleGroup = (key: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -791,6 +818,8 @@ const OrderListView: React.FC<OrderListViewProps> = ({
             activeYear={activeYear}
             setActiveYear={setActiveYear}
             availableMonths={availableMonths}
+            selectedMonths={selectedMonths}
+            onToggleMonth={onToggleMonth}
           />
         </div>
 
@@ -990,8 +1019,11 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                     <div className="flex flex-col items-start gap-0.5 text-[8px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:text-xs">
                       <span className="truncate">{order.place || "-"}</span>
                       {senderLabel && (
-                        <span className="max-w-full truncate rounded bg-secondary px-1 py-0.5 text-[7px] font-semibold text-muted-foreground sm:shrink-0 sm:px-1.5 sm:text-[9px]">
-                          By: {senderLabel}
+                        <span
+                          title={`Taken by ${senderLabel}`}
+                          className="max-w-full truncate rounded bg-primary/10 px-1 py-0.5 text-[7px] font-semibold text-primary ring-1 ring-primary/15 sm:shrink-0 sm:px-1.5 sm:text-[9px]"
+                        >
+                          By {senderLabel}
                         </span>
                       )}
                     </div>
@@ -1090,10 +1122,10 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                         </div>
                       )}
                       {!isDeliveryTab && otherLinkedOrder && (
-                          <div className="absolute -bottom-1 -right-1 bg-background rounded-tl p-0.5 shadow-sm">
-                            <Link2 size={10} className="text-primary" />
-                          </div>
-                        )}
+                        <div className="absolute -bottom-1 -right-1 bg-background rounded-tl p-0.5 shadow-sm">
+                          <Link2 size={10} className="text-primary" />
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0 pr-1">
                       <div className="mb-0.5 flex min-w-0 items-center gap-1">
@@ -1105,8 +1137,11 @@ const OrderListView: React.FC<OrderListViewProps> = ({
 
                       <div className="flex items-center gap-0.5 flex-wrap mb-0.5">
                         {senderLabel && (
-                          <span className="max-w-[130px] truncate rounded bg-secondary px-1 py-0.5 text-[8px] font-semibold text-muted-foreground">
-                            By: {senderLabel}
+                          <span
+                            title={`Taken by ${senderLabel}`}
+                            className="max-w-[130px] truncate rounded bg-primary/10 px-1 py-0.5 text-[8px] font-semibold text-primary ring-1 ring-primary/15"
+                          >
+                            By {senderLabel}
                           </span>
                         )}
                         {order.note && (
@@ -1228,6 +1263,31 @@ const OrderListView: React.FC<OrderListViewProps> = ({
           </div>
         </div>
       )}
+
+      {hiddenCount > 0 && (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <span className="text-xs text-muted-foreground">
+            Showing {groupedOrders.length} of {allGroupedOrders.length}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setVisibleCount((n) => n + ROWS_PER_PAGE)}
+              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90"
+            >
+              Show {Math.min(hiddenCount, ROWS_PER_PAGE)} more
+            </button>
+            {hiddenCount > ROWS_PER_PAGE && (
+              <button
+                onClick={() => setVisibleCount(allGroupedOrders.length)}
+                className="rounded-xl border border-border/80 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-secondary"
+              >
+                Show all {allGroupedOrders.length}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {isSelectMode && selectedOrders.size > 1 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 pr-4 z-50">
           <div className="bg-primary text-primary-foreground px-6 py-3 rounded-full shadow-xl flex items-center gap-4">

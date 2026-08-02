@@ -1,21 +1,15 @@
 import { Order } from "@/types";
+import { compressImage, uploadOrderImage } from "@/lib/image-store";
 
-export const uploadToImgBB = async (file: File): Promise<string> => {
-  // Compress image to max 1200px width/height and 0.7 quality to be lightning fast
-  const compressedFile = await compressImage(file);
+export { uploadOrderImage, uploadOrderImages } from "@/lib/image-store";
 
-  const apiKey = "3c43400a3770b8fc733935ff82e816fc"; // App's standard API key
-  const formData = new FormData();
-  formData.append("image", compressedFile, file.name || "image.jpg");
-
-  const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-    method: "POST",
-    body: formData,
-  });
-  const data = await response.json();
-  if (data.data?.url) return data.data.url;
-  throw new Error("Failed to upload image");
-};
+/**
+ * Stores a photo and returns its URL.
+ *
+ * Kept under its old name because it is called from a dozen views; the pictures now go
+ * to Supabase Storage rather than to ImgBB. Prefer `uploadOrderImage` in new code.
+ */
+export const uploadToImgBB = (file: File): Promise<string> => uploadOrderImage(file);
 
 export const fileToBase64 = async (file: File): Promise<string> => {
   const compressedFile = await compressImage(file);
@@ -24,50 +18,6 @@ export const fileToBase64 = async (file: File): Promise<string> => {
     reader.readAsDataURL(compressedFile);
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-  });
-};
-
-const compressImage = (file: File): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        let width = img.width;
-        let height = img.height;
-        const maxDimension = 800;
-
-        if (width > height && width > maxDimension) {
-          height *= maxDimension / width;
-          width = maxDimension;
-        } else if (height > maxDimension) {
-          width *= maxDimension / height;
-          height = maxDimension;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              resolve(file); // fallback
-            }
-          },
-          "image/jpeg",
-          0.6,
-        );
-      };
-      img.onerror = () => resolve(file); // fallback
-    };
-    reader.onerror = () => resolve(file); // fallback
   });
 };
 
@@ -92,6 +42,18 @@ export function getBoxName(order: Order): string {
   if (raw.toLowerCase().startsWith("box ")) return raw.substring(4).trim();
   if (raw.toLowerCase().startsWith("box")) return raw.substring(3).trim();
   return raw;
+}
+
+/**
+ * Whether an order already carries the free-shipping mark.
+ *
+ * Kept apart from `isOrderFree`, which also returns true for anything over the threshold.
+ * What matters when saving is narrower: has *this* order had the shipping taken off its
+ * price, because that is what the mark records and what the display adds back.
+ */
+export function carriesFreeShippingMark(order: Pick<Order, "extra" | "note">): boolean {
+  const check = (value: string) => /free(?:\s|-)?(?:shipping|ship)?|\[zero_ship\]/i.test(value);
+  return check(String(order.extra || "")) || check(String(order.note || ""));
 }
 
 export function isOrderFree(order: Order): boolean {
@@ -202,7 +164,9 @@ export const isSameCustomer = (a: Order, b: Order): boolean => {
   // shipments even for the same person, so the week window applies to a link
   // made by hand exactly as it does to one made automatically.
   if (!isWithinLinkWindow(a, b)) return false;
-  return hasSameValidPhone(a, b) || hasSameInstagram(a, b);
+  // Phone only. A shared Instagram handle used to be enough, which suggested links
+  // between different people who had simply ordered through the same account.
+  return hasSameValidPhone(a, b);
 };
 
 const parseOrderTime = (value: unknown) => {
@@ -250,82 +214,130 @@ const isSameCustomerReceipt = (a: Order, b: Order) => {
   return hasSameValidPhone(a, b);
 };
 
-export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
-  const ordersByKey = new Map(allOrders.map((o) => [getOrderKey(o), o]));
-  const clusterKeys = new Set<string>([getOrderKey(order)]);
+/**
+ * Every order that shares a receipt, keyed by any member's order key.
+ *
+ * Built as connected components rather than grown outwards from one order, which is what
+ * fixes the long-standing complaint that two linked orders showed different totals. The
+ * old code decided membership by comparing each candidate against *the order you happened
+ * to open*, and one of those comparisons is a seven-day window. With orders on day 0, 5
+ * and 9, opening the first saw {1,2} and opening the second saw {1,2,3} — so the same
+ * group billed 28,000 from one order and 33,000 from another. A component is the same set
+ * whichever member you enter it from, so every linked order now shows one receipt.
+ *
+ * Two kinds of edge join orders:
+ *   - one made by hand, honoured whatever the details say, because a person chose it;
+ *   - one found automatically, which needs the same phone and the week window.
+ * An unlink made by hand beats both, and is the way to break a join that should not exist.
+ */
+const clusterCache = new WeakMap<Order[], Map<string, Order[]>>();
 
-  const hasManualUnlink = (aKey: string, bKey: string) => {
-    const a = ordersByKey.get(aKey);
-    const b = ordersByKey.get(bKey);
-    const aBlocks = (a?.linkedOrderIds || [])
-      .filter(isUnlinkMarker)
-      .map((id) => normalizeUnlinkKey(id, a?.sheet_name));
-    const bBlocks = (b?.linkedOrderIds || [])
-      .filter(isUnlinkMarker)
-      .map((id) => normalizeUnlinkKey(id, b?.sheet_name));
-    return aBlocks.includes(bKey) || bBlocks.includes(aKey);
+function buildClusters(allOrders: Order[]): Map<string, Order[]> {
+  const cached = clusterCache.get(allOrders);
+  if (cached) return cached;
+
+  const parent = new Map<string, string>();
+  const find = (key: string): string => {
+    let root = key;
+    while (parent.get(root) !== root) root = parent.get(root) as string;
+    // Flattened so repeated lookups stay cheap on a long chain.
+    let walk = key;
+    while (parent.get(walk) !== root) {
+      const next = parent.get(walk) as string;
+      parent.set(walk, root);
+      walk = next;
+    }
+    return root;
+  };
+  const union = (a: string, b: string) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent.set(rootA, rootB);
   };
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const candidate of allOrders) {
-      const candidateKey = getOrderKey(candidate);
-      if (Array.from(clusterKeys).some((key) => hasManualUnlink(key, candidateKey))) continue;
+  const byKey = new Map<string, Order>();
+  for (const order of allOrders) {
+    const key = getOrderKey(order);
+    byKey.set(key, order);
+    parent.set(key, key);
+  }
 
-      const linkedRefs = (candidate.linkedOrderIds || [])
-        .filter((id) => !isUnlinkMarker(id))
-        .map((id) => ({ key: normalizeLinkedKey(id, candidate.sheet_name) }));
-      const linkedKeys = linkedRefs.map((ref) => ref.key);
-      const sameCustomerReceipt = isSameCustomerReceipt(order, candidate);
-      const touchesCluster =
-        sameCustomerReceipt ||
-        clusterKeys.has(candidateKey) ||
-        linkedKeys.some((key) => clusterKeys.has(key));
+  const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
-      if (!touchesCluster) continue;
-
-      // A recorded reference is only honored if the two orders it names are
-      // still provably the same customer right now. The old code trusted any
-      // reference written in "id:sheet" form on sight, so one bad or stale
-      // row - a direct sheet edit, leftover from a past bug, a one-way
-      // reference left behind on just one side - kept pulling an unrelated
-      // customer into the group forever. That bad row was immune to every
-      // fix made to the places that create links, since those only stop new
-      // bad writes and never re-check old ones. Re-checking identity here
-      // means a bad reference simply stops rendering as linked, from
-      // whatever source it came.
-      const hasValidLinkToCluster = linkedRefs.some((ref) => {
-        if (!clusterKeys.has(ref.key)) return false;
-        const target = ordersByKey.get(ref.key);
-        return target ? isSameCustomer(candidate, target) : false;
-      });
-      const canAddCandidate =
-        clusterKeys.has(candidateKey) || sameCustomerReceipt || hasValidLinkToCluster;
-      if (!canAddCandidate) continue;
-
-      if (!clusterKeys.has(candidateKey)) {
-        clusterKeys.add(candidateKey);
-        changed = true;
-      }
-
-      linkedRefs.forEach((ref) => {
-        const linkedOrder = ordersByKey.get(ref.key);
-        if (linkedOrder && isSameCustomer(candidate, linkedOrder) && !clusterKeys.has(ref.key)) {
-          clusterKeys.add(ref.key);
-          changed = true;
-        }
-      });
+  // Unlinks are collected first so no later edge can override one.
+  const blocked = new Set<string>();
+  for (const order of allOrders) {
+    const key = getOrderKey(order);
+    for (const id of order.linkedOrderIds || []) {
+      if (!isUnlinkMarker(id)) continue;
+      blocked.add(pairKey(key, normalizeUnlinkKey(id, order.sheet_name)));
     }
   }
 
-  return Array.from(clusterKeys)
-    .map((key) => ordersByKey.get(key))
-    .filter((o): o is Order => Boolean(o))
-    .sort(
+  for (const order of allOrders) {
+    const key = getOrderKey(order);
+    for (const id of order.linkedOrderIds || []) {
+      if (isUnlinkMarker(id)) continue;
+      const other = normalizeLinkedKey(id, order.sheet_name);
+      if (!byKey.has(other) || blocked.has(pairKey(key, other))) continue;
+      union(key, other);
+    }
+  }
+
+  // Bucketed by phone, so orders are only ever compared with others on the same number.
+  // Comparing all of them with each other is four million pairs on a 2,000-row table and
+  // this runs on every render.
+  const byPhone = new Map<string, Order[]>();
+  for (const order of allOrders) {
+    for (const phone of getValidPhones(order)) {
+      const bucket = byPhone.get(phone);
+      if (bucket) bucket.push(order);
+      else byPhone.set(phone, [order]);
+    }
+  }
+  for (const bucket of byPhone.values()) {
+    for (let i = 0; i < bucket.length; i++) {
+      for (let j = i + 1; j < bucket.length; j++) {
+        const a = bucket[i];
+        const b = bucket[j];
+        const keyA = getOrderKey(a);
+        const keyB = getOrderKey(b);
+        if (blocked.has(pairKey(keyA, keyB))) continue;
+        if (!isWithinLinkWindow(a, b)) continue;
+        union(keyA, keyB);
+      }
+    }
+  }
+
+  const byRoot = new Map<string, Order[]>();
+  for (const key of byKey.keys()) {
+    const root = find(key);
+    const bucket = byRoot.get(root);
+    if (bucket) bucket.push(byKey.get(key) as Order);
+    else byRoot.set(root, [byKey.get(key) as Order]);
+  }
+
+  const clusters = new Map<string, Order[]>();
+  for (const group of byRoot.values()) {
+    const sorted = [...group].sort(
       (a, b) =>
         String(a.sheet_name).localeCompare(String(b.sheet_name)) || Number(a.id) - Number(b.id),
     );
+    for (const member of sorted) clusters.set(getOrderKey(member), sorted);
+  }
+
+  clusterCache.set(allOrders, clusters);
+  return clusters;
+}
+
+/**
+ * The orders sharing a receipt with this one, itself included.
+ *
+ * The same set for every member of the group, so a receipt cannot change depending on
+ * which of its orders is open.
+ */
+export function getLinkedGroup(order: Order, allOrders: Order[]): Order[] {
+  return buildClusters(allOrders).get(getOrderKey(order)) ?? [order];
 }
 
 export function getDisplayPrice(order: Order, allOrders?: Order[]): number {

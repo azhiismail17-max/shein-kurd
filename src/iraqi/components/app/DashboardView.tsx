@@ -22,6 +22,7 @@ import {
   Cell,
 } from "recharts";
 import MonthSelector from "./MonthSelector";
+import { ACTIVITY_LABELS, ACTIVITY_VIEWS, ActivityView, buildActivity } from "@/lib/order-activity";
 
 const parseAmount = (value: string | number | undefined) =>
   Number(String(value || "").replace(/[^0-9.-]+/g, "")) || 0;
@@ -64,6 +65,8 @@ const getBoughtBoxFinancials = (orders: Order[]) => {
 interface DashboardViewProps {
   stats: MonthlyStats | undefined;
   orders: Order[];
+  /** Every order the app holds, so the activity chart can span all months. */
+  allOrders: Order[];
   viewingMonth: string;
   availableMonths: string[];
   setViewingMonth: (m: string) => void;
@@ -77,6 +80,7 @@ interface DashboardViewProps {
 const DashboardView: React.FC<DashboardViewProps> = ({
   stats,
   orders,
+  allOrders,
   viewingMonth,
   availableMonths,
   setViewingMonth,
@@ -87,7 +91,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   setActiveYear,
 }) => {
   const [showFinancials, setShowFinancials] = useState(false);
-  const [timeframe, setTimeframe] = useState<"daily" | "weekly" | "hourly">("daily");
+  const [timeframe, setTimeframe] = useState<ActivityView>("monthly");
+  /** Whether the activity chart covers every month or only the one being viewed. */
+  const [activityAllMonths, setActivityAllMonths] = useState(true);
 
   const totalOrders = orders.length;
   const pendingOrders = orders.filter((o) => getOrderStatus(o) === "pending").length;
@@ -110,25 +116,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const { revenue, buy, wgt, etc, lost, totalCost, profit, margin, boughtBoxes } =
     boughtBoxFinancials;
 
-  const activityData = useMemo(() => {
-    const map = new Map<string, number>();
-    orders.forEach((order) => {
-      if (!order.date || order.date === "Unknown Date") return;
-      const parts = order.date.split(" ");
-      if (parts.length !== 2) return;
-      const [datePart, timePart] = parts;
-      const [day, month] = datePart.split("/");
-      const [hour] = timePart.split(":");
-      let key = "";
-      if (timeframe === "weekly") key = `Week ${Math.ceil(parseInt(day, 10) / 7)}`;
-      else if (timeframe === "daily") key = `${day}/${month}`;
-      else key = `${hour}:00`;
-      map.set(key, (map.get(key) || 0) + 1);
-    });
-    return Array.from(map.keys())
-      .sort()
-      .map((k) => ({ name: k, orders: map.get(k) || 0 }));
-  }, [orders, timeframe]);
+  const activity = useMemo(
+    () => buildActivity(activityAllMonths ? allOrders : orders, timeframe),
+    [allOrders, orders, activityAllMonths, timeframe],
+  );
 
   const statusData = [
     { name: "Pending", value: pendingOrders, color: "hsl(var(--status-pending))" },
@@ -308,34 +299,55 @@ const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <h3 className="font-bold text-sm">Order Activity</h3>
             </div>
-            <div className="flex gap-1">
-              {(["daily", "weekly", "hourly"] as const).map((tf) => (
+            <div className="flex flex-wrap items-center justify-end gap-1">
+              <button
+                onClick={() => setActivityAllMonths((on) => !on)}
+                className={`mr-1 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold uppercase transition-all ${activityAllMonths ? "bg-primary/15 text-primary ring-1 ring-primary/25" : "text-muted-foreground hover:bg-secondary"}`}
+                title="Switch between every month and the month you are viewing"
+              >
+                {activityAllMonths ? "All months" : viewingMonth}
+              </button>
+              {ACTIVITY_VIEWS.map((view) => (
                 <button
-                  key={tf}
-                  onClick={() => setTimeframe(tf)}
-                  className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold uppercase transition-all ${timeframe === tf ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary"}`}
+                  key={view}
+                  onClick={() => setTimeframe(view)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold uppercase transition-all ${timeframe === view ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary"}`}
                 >
-                  {tf}
+                  {ACTIVITY_LABELS[view]}
                 </button>
               ))}
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={activityData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-              <Tooltip
-                contentStyle={{
-                  background: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "8px",
-                  fontSize: 12,
-                }}
-              />
-              <Bar dataKey="orders" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {activity.counted.toLocaleString()} orders
+            {activity.undated > 0 &&
+              ` · ${activity.undated.toLocaleString()} older orders have no date, so they only appear under Monthly`}
+          </div>
+          {activity.points.length === 0 ? (
+            <div className="flex h-[220px] items-center justify-center rounded-xl border border-dashed border-border text-xs text-muted-foreground">
+              No dated orders in this range
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={activity.points}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                />
+                <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "8px",
+                    fontSize: 12,
+                  }}
+                />
+                <Bar dataKey="orders" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         <div className="bg-card p-5 rounded-2xl border border-border/80">

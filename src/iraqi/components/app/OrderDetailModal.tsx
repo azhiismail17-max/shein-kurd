@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
+import { deleteOrderEverywhere } from "@/lib/submitOrder";
 import {
   Order,
   SCRIPT_URL,
@@ -153,6 +154,23 @@ const OrderDetailModal: React.FC<Props> = ({
         } catch (e) {
           console.error("Failed unlink before delete", e);
         }
+      }
+
+      // Supabase first, exactly as the Kurdistani screen does. Deleting the sheet row on
+      // its own left the Supabase copy behind with nothing left to match it by, so the
+      // order stayed in the database and kept counting towards its author for good.
+      // Failing here stops the delete, leaving the order in both places to retry.
+      const removed = await deleteOrderEverywhere("iraqi", {
+        unique_order_id: order.unique_order_id,
+        sheet_name: order.sheet_name,
+        id: order.id,
+      });
+      if (!removed.ok) {
+        alert(removed.error || "Could not delete from the database");
+        return;
+      }
+      if (removed.supabaseDeleted === 0) {
+        console.warn("[delete] no matching Supabase row; removing from the sheet only");
       }
 
       const res = await fetchWithRetry(SCRIPT_URL, {

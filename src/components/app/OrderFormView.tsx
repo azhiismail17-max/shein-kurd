@@ -1,18 +1,25 @@
+/** Newline for the multi-line upload report. */
+const BREAK = String.fromCharCode(10);
+
+import type { ImageKind } from "@/lib/image-store";
+import { uploadOrderImages } from "@/lib/image-store";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Order, SCRIPT_URL, getOrderStatus, STATUS_COLORS } from "@/types";
 import { findAutoBoxName } from "@/lib/autoBox";
 import {
   getDisplayPrice,
   getSheetPriceForSave,
+  carriesFreeShippingMark,
   isOrderFree,
   isSameCustomer,
-  uploadToImgBB,
   fileToBase64,
 } from "@/lib/order-utils";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { queueOrderForSkuExtraction } from "@/lib/sku-queue";
 import { recordOrderCreated, resolveTeamUsername } from "@/lib/teamActivity";
 import { ChevronLeft, Upload, X, Sparkles, Link2, Eye } from "lucide-react";
+import { submitKurdistaniOrder, updateOrderEverywhere } from "@/lib/submitOrder";
+import { toast } from "sonner";
 
 interface OrderFormViewProps {
   activeSheet: string;
@@ -66,6 +73,19 @@ const normalizePhoneDigits = (value: unknown) =>
       return digits.replace(/^0+/, "");
     })
     .filter(Boolean);
+
+/**
+ * The money columns are `bigint`, so a value that is not a whole number is sent as
+ * null rather than being reduced to its digits — that would store an amount nobody
+ * typed.
+ */
+function toWholeNumber(raw: unknown): number | null {
+  if (raw === "" || raw === null || raw === undefined) return null;
+  const cleaned = String(raw).trim().replace(/[,\s]/g, "");
+  if (!/^-?\d+(\.0+)?$/.test(cleaned)) return null;
+  const value = Math.trunc(Number(cleaned));
+  return Number.isSafeInteger(value) ? value : null;
+}
 
 const OrderFormView: React.FC<OrderFormViewProps> = ({
   activeSheet,
@@ -368,7 +388,9 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
           .split("/")[0]
           .trim() || prev.phone,
       phone2: s.phone2 || prev.phone2,
-      pics_text: s.pics_text || prev.pics_text,
+      // The piece count is deliberately not carried over. It belongs to that order, not
+      // to the customer, and copying it silently priced the new order for the wrong
+      // number of items.
     }));
     if (derivedRegion) setRegion(derivedRegion);
     setShowSuggestions(false);
@@ -387,43 +409,53 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
 
   const [isUploadingImgs, setIsUploadingImgs] = useState(false);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const arrayFiles = Array.from(files);
-      const newPreviews = arrayFiles.map((f) => URL.createObjectURL(f));
-      setPreviewPrimaryUrls((prev) => [...prev, ...newPreviews]);
-      setIsUploadingImgs(true);
-      try {
-        const uploadedUrls = await Promise.all(arrayFiles.map((f) => uploadToImgBB(f)));
-        setExistingPrimaryUrls((prev) => [...prev, ...uploadedUrls]);
-        setPreviewPrimaryUrls((prev) => prev.filter((p) => !newPreviews.includes(p)));
-      } catch (err) {
-        console.error("Image processing failed", err);
-      } finally {
-        setIsUploadingImgs(false);
+  /**
+   * Adds a batch of pictures to the order.
+   *
+   * There is no limit on how many can be attached. Each file is uploaded on its own, so
+   * one photo the browser cannot read no longer throws away the others that uploaded
+   * fine — which is what used to happen when a batch was sent with `Promise.all`.
+   */
+  const addImages = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    kind: ImageKind,
+    setSaved: React.Dispatch<React.SetStateAction<string[]>>,
+    setPreviews: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    const files = Array.from(e.target.files ?? []);
+    // Cleared so picking the same photo again after removing it still fires a change.
+    e.target.value = "";
+    if (!files.length) return;
+
+    const previews = files.map((f) => URL.createObjectURL(f));
+    setPreviews((prev) => [...prev, ...previews]);
+    setIsUploadingImgs(true);
+    try {
+      const { urls, failed, errors } = await uploadOrderImages(files, kind);
+      if (urls.length) setSaved((prev) => [...prev, ...urls]);
+      if (failed) {
+        console.error("[images] some uploads failed", errors);
+        alert(
+          [
+            `${urls.length} of ${files.length} pictures were saved.`,
+            "",
+            "These could not be uploaded:",
+            ...errors,
+          ].join(BREAK),
+        );
       }
+    } finally {
+      setPreviews((prev) => prev.filter((p) => !previews.includes(p)));
+      previews.forEach((url) => URL.revokeObjectURL(url));
+      setIsUploadingImgs(false);
     }
   };
 
-  const handleProofFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const arrayFiles = Array.from(files);
-      const newPreviews = arrayFiles.map((f) => URL.createObjectURL(f));
-      setPreviewProofUrls((prev) => [...prev, ...newPreviews]);
-      setIsUploadingImgs(true);
-      try {
-        const uploadedUrls = await Promise.all(arrayFiles.map((f) => uploadToImgBB(f)));
-        setExistingProofUrls((prev) => [...prev, ...uploadedUrls]);
-        setPreviewProofUrls((prev) => prev.filter((p) => !newPreviews.includes(p)));
-      } catch (err) {
-        console.error("Image processing failed", err);
-      } finally {
-        setIsUploadingImgs(false);
-      }
-    }
-  };
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+    addImages(e, "primary", setExistingPrimaryUrls, setPreviewPrimaryUrls);
+
+  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+    addImages(e, "proof", setExistingProofUrls, setPreviewProofUrls);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -450,7 +482,17 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
       );
       const isAutoFree = priceVal + linkedTotal > 118000 || hasFreeShippingNote;
 
-      const shouldApplyFree = freeShipping || isAutoFree;
+      // Free shipping is one discount for one delivery, so it comes off one order only.
+      // Every linked order used to take it again: saving the second one saw the combined
+      // total pass the threshold, subtracted the shipping from its price too, and the
+      // group lost the charge twice over. The mark and the deduction have to travel
+      // together, because the display adds the shipping back wherever it finds the mark.
+      const groupAlreadyCarriesFree = linkedOrders.some(carriesFreeShippingMark);
+      // An order that already holds the mark keeps it. Stripping it while leaving the
+      // price reduced would hide a deduction that had already happened.
+      const selfAlreadyCarriesFree = carriesFreeShippingMark(formData);
+      const shouldApplyFree =
+        (freeShipping || isAutoFree) && (selfAlreadyCarriesFree || !groupAlreadyCarriesFree);
       const originalDisplayPrice = isEditing ? getDisplayPrice(editingOrder!, allOrders) : 0;
       const priceWasChanged = !isEditing || priceVal !== originalDisplayPrice;
       const sheetPrice = priceWasChanged
@@ -474,7 +516,9 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
       const currentMonthOrders = allOrders.filter((o) => o.sheet_name === targetSheet);
 
       if (!isEditing) {
-        newBoxNameAttr = findAutoBoxName(currentMonthOrders, pieces);
+        // allOrders supplies the global numbering; currentMonthOrders decides which
+        // box in this month may still be added to.
+        newBoxNameAttr = findAutoBoxName(currentMonthOrders, pieces, { allOrders });
       }
 
       const tempId = isEditing ? undefined : Date.now();
@@ -518,6 +562,35 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
       // This makes linking orders feel instant instead of waiting on Apps Script.
       if (isEditing) {
         onSuccess(payload);
+        // Supabase is updated alongside the sheet so an edit does not leave the two
+        // copies disagreeing. Only the details change — never the month or region.
+        updateOrderEverywhere(
+          "kurdistani",
+          {
+            unique_order_id: editingOrder?.unique_order_id,
+            sheet_name: editingOrder?.sheet_name,
+            id: editingOrder?.id,
+          },
+          {
+            insta: formData.insta?.trim() || null,
+            name: formData.name?.trim() || null,
+            place: formData.place?.trim() || null,
+            phone: formData.phone?.trim() || null,
+            fib: formData.fib?.trim() || null,
+            price: toWholeNumber(sheetPrice),
+            box_cost: toWholeNumber(formData.box_cost),
+            pics_text: formData.pics_text ? String(formData.pics_text) : null,
+            box_name: newBoxNameAttr || null,
+            track_no: formData.trackNo?.trim() || null,
+            initial_payment: toWholeNumber(formData.initial_payment),
+            link: formData.link?.trim() || null,
+            note: cleanNote || null,
+            extra: extraWithFree || null,
+            primary_urls: existingPrimaryUrls.join(",") || null,
+            proof_urls: existingProofUrls.join(",") || null,
+          },
+        ).catch((err) => console.error("Supabase edit sync failed", err));
+
         fetchWithRetry(SCRIPT_URL, { method: "POST", body: JSON.stringify(payload) })
           .then(() => {
             // Persist ALL primary pictures via the dedicated action,
@@ -571,61 +644,65 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
         }
       }
 
-      // Fire the actual save in the background and reconcile when we know the real row id
+      // New orders are recorded in Supabase, not the sheet. The pictures travel in
+      // the same insert, so there is no follow-up write to reconcile.
       (async () => {
         try {
-          const res = await fetchWithRetry(SCRIPT_URL, {
-            method: "POST",
-            body: JSON.stringify(payload),
-          });
-          const text = await res.text();
-          let result: any;
-          try {
-            result = JSON.parse(text);
-          } catch {
+          const result = await submitKurdistaniOrder(
+            {
+              name: formData.name,
+              insta: formData.insta,
+              phone: formData.phone,
+              price: sheetPrice,
+              place: formData.place,
+              link: formData.link,
+              pics_text: formData.pics_text,
+              initial_payment: formData.initial_payment,
+              box_cost: formData.box_cost,
+              fib: formData.fib,
+              box_name: newBoxNameAttr,
+              trackNo: formData.trackNo,
+              primary_urls: existingPrimaryUrls.join(","),
+              proof_urls: existingProofUrls.join(","),
+              extra: extraWithFree,
+              note: cleanNote,
+            },
+            { adminName: currentUser, adminRole: currentRole },
+            // The sheet keeps a copy so the order stays visible and editable until
+            // reads and edits have moved to Supabase.
+            { sheetPayload: payload, primaryUrls: existingPrimaryUrls },
+          );
+
+          if (!result.ok) {
+            toast.error(result.error || "Could not save the order");
             return;
           }
-          if (result?.status === "success") {
-            const rowMatch = String(result.message || "").match(/Row (\d+)/);
-            const realRowId = rowMatch ? Number(rowMatch[1]) : undefined;
 
-            // Hand the link to the SKU extractor bot as a pending row. The sheet
-            // above stays the record of the order itself; this only exists so the
-            // product code gets filled in automatically. Deliberately not awaited
-            // and never allowed to throw - the order is already saved.
-            queueOrderForSkuExtraction({
-              name: String(payload.insta || payload.name || "").trim(),
-              link: String(payload.link || ""),
-              pcs: payload.pics_text,
-              requestId: payload.client_request_id,
-            }).catch((error) => console.warn("SKU queue failed", error));
+          if (result.sheetError) {
+            toast.warning("Saved, but not yet editable — the sheet copy failed.");
+          } else if (result.sheetRowId) {
+            // Swap the temporary id for the sheet's real row number so the order can
+            // be opened and edited straight away.
+            onSuccess({ ...payload, row_id: result.sheetRowId, _tempId: tempId });
+          }
 
-            try {
-              await recordOrderCreated("kurdistani", currentUser, currentRole, {
-                ...payload,
-                row_id: realRowId || tempId,
-              });
-            } catch (e) {
-              console.error("Failed to update user stats", e);
-            }
+          // Hand the link to the SKU extractor bot as a pending row. The order is
+          // already saved; this only fills in the product code, and is never
+          // allowed to throw.
+          queueOrderForSkuExtraction({
+            name: String(payload.insta || payload.name || "").trim(),
+            link: String(payload.link || ""),
+            pcs: payload.pics_text,
+            requestId: payload.client_request_id,
+          }).catch((error) => console.warn("SKU queue failed", error));
 
-            if (rowMatch) {
-              onSuccess({ ...payload, row_id: realRowId, _tempId: tempId }, result.message);
-
-              // Persist ALL primary pictures (the main create handler only writes
-              // a single image column; this dedicated action stores the full list).
-              if (existingPrimaryUrls.length > 0) {
-                fetchWithRetry(SCRIPT_URL, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    action: "update_primary_picture",
-                    sheet_name: payload.sheet,
-                    row_id: realRowId,
-                    primary_urls: existingPrimaryUrls.join(","),
-                  }),
-                }).catch((err) => console.error("Primary urls save failed", err));
-              }
-            }
+          try {
+            await recordOrderCreated("kurdistani", currentUser, currentRole, {
+              ...payload,
+              row_id: result.sheetRowId || tempId,
+            });
+          } catch (e) {
+            console.error("Failed to update user stats", e);
           }
         } catch (err) {
           console.error("Background save failed", err);
@@ -783,6 +860,53 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
       </div>
 
       <div className="space-y-3 sm:space-y-4" ref={suggestionContainerRef}>
+        {/* Linked Orders first: the customer is chosen by linking, and picking an
+            order fills in their details, so this belongs before the fields it fills. */}
+        {/* Link Orders */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Linked Orders
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowLinkModal(true)}
+              className="flex items-center gap-1 text-xs text-primary font-medium hover:underline"
+            >
+              <Link2 size={12} /> Connect Order
+            </button>
+          </div>
+          {linkedOrders.length > 0 && (
+            <div className="space-y-1">
+              {linkedOrders.map((o) => (
+                <div
+                  key={`${o.id}-${o.sheet_name}`}
+                  className="flex items-center justify-between bg-secondary px-3 py-2 rounded-lg text-sm"
+                >
+                  <span className="font-medium">
+                    {o.name || o.insta}{" "}
+                    <span className="text-muted-foreground text-xs">
+                      #{o.id} · {o.sheet_name}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      linkSelectionTouchedRef.current = true;
+                      setLinkedIds((p) =>
+                        p.filter((id) => id !== `${o.id}:${o.sheet_name}` && id !== o.id),
+                      );
+                    }}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Instagram with suggestions */}
         <div className="relative">
           {renderField("Instagram", "insta", "text", "@username", true)}
@@ -833,8 +957,12 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
 
         <div className="border border-border/80 p-3 sm:p-4 rounded-2xl bg-secondary/20 mt-2">
           <h3 className="text-sm font-semibold mb-3 flex items-center justify-between">
-            Primary Image{" "}
-            <span className="text-xs text-muted-foreground font-normal">Optional</span>
+            Primary Images{" "}
+            <span className="text-xs text-muted-foreground font-normal">
+              {existingPrimaryUrls.length > 0
+                ? `${existingPrimaryUrls.length} added`
+                : "Optional — add 5 or more"}
+            </span>
           </h3>
           <div className="grid grid-cols-3 gap-2">
             <input
@@ -900,10 +1028,16 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
 
         <div className="border border-border/80 p-3 sm:p-4 rounded-2xl bg-secondary/20 mt-2">
           <h3 className="text-sm font-semibold mb-3 flex items-center justify-between text-primary">
-            Proof Picture{" "}
-            <span className="text-[10px] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded uppercase font-bold">
-              Required
-            </span>
+            Proof Pictures{" "}
+            {existingProofUrls.length > 0 ? (
+              <span className="text-xs text-muted-foreground font-normal">
+                {existingProofUrls.length} added — 3 or more is fine
+              </span>
+            ) : (
+              <span className="text-[10px] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded uppercase font-bold">
+                Required
+              </span>
+            )}
           </h3>
           <div className="grid grid-cols-3 gap-2">
             <input
@@ -988,54 +1122,10 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
           </div>
         )}
 
-        {/* Link Orders */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Linked Orders
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowLinkModal(true)}
-              className="flex items-center gap-1 text-xs text-primary font-medium hover:underline"
-            >
-              <Link2 size={12} /> Connect Order
-            </button>
-          </div>
-          {linkedOrders.length > 0 && (
-            <div className="space-y-1">
-              {linkedOrders.map((o) => (
-                <div
-                  key={`${o.id}-${o.sheet_name}`}
-                  className="flex items-center justify-between bg-secondary px-3 py-2 rounded-lg text-sm"
-                >
-                  <span className="font-medium">
-                    {o.name || o.insta}{" "}
-                    <span className="text-muted-foreground text-xs">
-                      #{o.id} · {o.sheet_name}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      linkSelectionTouchedRef.current = true;
-                      setLinkedIds((p) =>
-                        p.filter((id) => id !== `${o.id}:${o.sheet_name}` && id !== o.id),
-                      );
-                    }}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Checkout Summary */}
         <div className="bg-primary/5 border border-primary/20 p-3 sm:p-4 rounded-2xl space-y-2 mt-4">
           <h3 className="text-sm font-bold border-b border-border pb-2 mb-2">Cart Summary</h3>
+
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Item Price</span>
             <span>
@@ -1205,13 +1295,41 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
                         ...formData,
                         date: isEditing ? editingOrder?.date || "" : new Date().toISOString(),
                       } as Order;
-                      if (!isSameCustomer(currentOrderContext, o)) {
+
+                      // A blank form has no phone yet, so the same-customer check could
+                      // never pass and a new order could not be linked to anything at
+                      // all. Picking the order is how you say who the customer is: the
+                      // details are adopted from it. The check still applies once the
+                      // form names a customer of its own, so an order already filled in
+                      // cannot be attached to a different person.
+                      const namesACustomer = Boolean(
+                        String(formData.phone || "").trim() || String(formData.insta || "").trim(),
+                      );
+                      if (namesACustomer && !isSameCustomer(currentOrderContext, o)) {
                         alert(
-                          "This order can't be linked: it needs to share the same phone number " +
-                            "or Instagram, and be within 7 days.",
+                          "This order can't be linked: it needs to share the same phone number, " +
+                            "and be within 7 days.",
                         );
                         return;
                       }
+
+                      setFormData((prev) => ({
+                        ...prev,
+                        insta: prev.insta || o.insta || "",
+                        name: prev.name || o.name || "",
+                        phone:
+                          prev.phone ||
+                          String(o.phone || "")
+                            .split("/")[0]
+                            .trim(),
+                        phone2: prev.phone2 || o.phone2 || "",
+                        // Forced, not filled: linked orders are one delivery, so they
+                        // have to go to one place or the shipping charge is meaningless.
+                        place: o.place || prev.place,
+                        // pics_text is left alone on purpose — the piece count is this
+                        // order's own.
+                      }));
+
                       linkSelectionTouchedRef.current = true;
                       setLinkedIds((p) => [...p, `${o.id}:${o.sheet_name}`]);
                       setShowLinkModal(false);

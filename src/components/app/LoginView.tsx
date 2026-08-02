@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { SCRIPT_URL } from "@/types";
-import { SCRIPT_URL as IRAQI_SCRIPT_URL } from "@/iraqi/types";
-import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { Lock, User, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/lib/supabase";
+
+/** Accounts are created as <username>@this-domain in Supabase Auth. */
+const ACCOUNT_EMAIL_DOMAIN = "shein-kurd.local";
 
 export const LoginView = ({ onLogin }: { onLogin: (role: string) => void }) => {
   const [username, setUsername] = useState("");
@@ -11,91 +12,70 @@ export const LoginView = ({ onLogin }: { onLogin: (role: string) => void }) => {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
+  /**
+   * Supabase Auth signs in with an email, while the team has always typed a plain
+   * username. The username is turned into its account email so nobody has to learn
+   * a new one; typing a full email still works.
+   */
+  const toEmail = (value: string) =>
+    value.includes("@")
+      ? value.trim().toLowerCase()
+      : `${value.trim().toLowerCase()}@${ACCOUNT_EMAIL_DOMAIN}`;
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) return;
     setLoading(true);
+
     try {
-      const normalizedUsername = username.toLowerCase().trim();
-      const loginAgainst = async (url: string) => {
-        const payload = new URLSearchParams();
-        payload.append("action", "login");
-        payload.append("username", username);
-        payload.append("password", password);
+      const { data: auth, error: authError } = await supabase.auth.signInWithPassword({
+        email: toEmail(username),
+        password,
+      });
 
-        try {
-          const res = await fetchWithRetry(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: payload.toString(),
-          });
-          const text = await res.text();
-          try {
-            return JSON.parse(text);
-          } catch (parseError) {
-            console.log("Backend did not return JSON, using fallback mode");
-            return { status: "error", message: "Backend not updated" };
-          }
-        } catch (networkError) {
-          console.log("Network error, using fallback mode");
-          return { status: "error", message: "Network error" };
-        }
-      };
-
-      let data: any = await loginAgainst(SCRIPT_URL);
-      let targetSystem = data.system || data.profile || "kurdistani";
-
-      if (data.status !== "success") {
-        const iraqiData = await loginAgainst(IRAQI_SCRIPT_URL);
-        if (iraqiData.status === "success") {
-          data = iraqiData;
-          targetSystem = "iraqi";
-        }
-      } else if (targetSystem === "iraqi") {
-        targetSystem = "iraqi";
-      }
-
-      // Hardcoded fallback since backend is not updated yet
-      if (data.status !== "success") {
-        const hardcodedUsers: Record<
-          string,
-          { pass: string; role: string; system?: "kurdistani" | "iraqi" }
-        > = {
-          owner: { pass: "mostang2021", role: "owner" },
-          admin: { pass: "shein4321", role: "admin" },
-          moderator: { pass: "shein1234", role: "moderator", system: "iraqi" },
-          modertor: { pass: "shein1234", role: "moderator", system: "iraqi" },
-          delivery: { pass: "sheindelivery", role: "delivery", system: "iraqi" },
-          delvery: { pass: "sheindelivery", role: "delivery", system: "iraqi" },
-        };
-
-        const user = hardcodedUsers[normalizedUsername];
-        if (user && user.pass === password) {
-          data = { status: "success", role: user.role };
-          targetSystem = user.system || "kurdistani";
-        } else {
-          data = { status: "error", message: "Invalid username or password" };
-        }
-      }
-
-      if (data.status === "success") {
-        if (targetSystem === "iraqi") {
-          localStorage.setItem("iraqi_auth_role", data.role);
-          localStorage.setItem("iraqi_auth_username", normalizedUsername);
-          window.location.href = "/iraqi";
-          return;
-        }
-        localStorage.setItem("auth_role", data.role);
-        localStorage.setItem("auth_username", normalizedUsername);
-        onLogin(data.role);
-      } else {
+      if (authError || !auth.user) {
         toast({
           title: "Error",
-          description: data.message || "Invalid credentials",
+          description: authError?.message || "Invalid username or password",
           variant: "destructive",
         });
+        return;
       }
-    } catch (e) {
+
+      // The role and branch live in `profiles`, which each user may read for their
+      // own row once signed in. Without a profile there is no way to know what the
+      // person is allowed to see, so sign-in is undone rather than guessed at.
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("username, role, region")
+        .eq("id", auth.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        await supabase.auth.signOut();
+        toast({
+          title: "Account not set up",
+          description: "This login has no profile yet. Ask the owner to add one.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const resolvedName = String(profile.username || username).trim();
+
+      // Order history comes straight from Supabase under this user's own session, so
+      // there is no separate token to fetch any more.
+      if (profile.region === "iraqi") {
+        localStorage.setItem("iraqi_auth_role", profile.role);
+        localStorage.setItem("iraqi_auth_username", resolvedName);
+        window.location.href = "/iraqi";
+        return;
+      }
+
+      localStorage.setItem("auth_role", profile.role);
+      localStorage.setItem("auth_username", resolvedName);
+      onLogin(profile.role);
+    } catch {
       toast({
         title: "Error",
         description: "Failed to connect. Please try again.",

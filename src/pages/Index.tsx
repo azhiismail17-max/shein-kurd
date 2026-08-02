@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
 import {
   Order,
   ApiResponse,
@@ -20,6 +20,10 @@ import AppLayout from "@/components/app/AppLayout";
 import { LoginView } from "@/components/app/LoginView";
 import { SystemKey } from "@/components/app/SystemSwitcher";
 import { recordOrderDeleted } from "@/lib/teamActivity";
+import { loadOrders, flattenOrders, isLiveMonth, OrdersLoadError } from "@/lib/orders-source";
+import { supabase } from "@/lib/supabase";
+import { deleteOrderEverywhere, updateOrderEverywhere } from "@/lib/submitOrder";
+import { registerYearMonths, getYearMonths, getAllMonths, getMonthIndex } from "@/lib/year-months";
 
 const DashboardView = React.lazy(() => import("@/components/app/DashboardView"));
 const OrderFormView = React.lazy(() => import("@/components/app/OrderFormView"));
@@ -27,7 +31,6 @@ const OrderListView = React.lazy(() => import("@/components/app/OrderListView"))
 const OrderDetailModal = React.lazy(() => import("@/components/app/OrderDetailModal"));
 const BatchesView = React.lazy(() => import("@/components/app/BatchesView"));
 const ExpensesView = React.lazy(() => import("@/components/app/ExpensesView"));
-const GiftCardsView = React.lazy(() => import("@/components/app/GiftCardsView"));
 
 const LOCAL_GIFT_CARDS_KEY = "kurdistani_gift_cards_cache";
 
@@ -75,6 +78,8 @@ const CalculatorView = React.lazy(() => import("@/components/app/CalculatorView"
 const CameraSearchModal = React.lazy(() => import("@/components/app/CameraSearchModal"));
 const MessagesView = React.lazy(() => import("@/components/app/MessagesView"));
 const TeamView = React.lazy(() => import("@/components/app/TeamView"));
+const TeamPerformanceView = React.lazy(() => import("@/components/app/TeamPerformanceView"));
+const GiftCardManagerView = React.lazy(() => import("@/components/app/GiftCardManagerView"));
 
 const DEFAULT_YEAR = Object.keys(YEARS_CONFIG).sort().pop() || "2026";
 const DEFAULT_MONTH = ACTIVE_ORDER_SHEET;
@@ -90,15 +95,16 @@ for (const year of Object.keys(YEARS_CONFIG).sort()) {
   }
 }
 const globalSort = (a: Order, b: Order) => {
-  const diff = (sheetIndex[b.sheet_name] ?? 0) - (sheetIndex[a.sheet_name] ?? 0);
+  const diff = getMonthIndex(b.sheet_name) - getMonthIndex(a.sheet_name);
   if (diff !== 0) return diff;
   return Number(b.id) - Number(a.id);
 };
 
 const getRecentSearchMonths = (month: string) => {
-  const index = ALL_MONTHS.indexOf(month);
+  const months = getAllMonths();
+  const index = months.indexOf(month);
   if (index < 0) return [month];
-  return ALL_MONTHS.slice(Math.max(0, index - 2), index + 1);
+  return months.slice(Math.max(0, index - 2), index + 1);
 };
 
 const getSearchFields = (o: Order) => [
@@ -160,8 +166,54 @@ const Index: React.FC = () => {
   const [activeMonth, setActiveMonth] = useState(DEFAULT_MONTH);
   const [viewingMonth, setViewingMonth] = useState(() => {
     const saved = localStorage.getItem("app_viewingMonth");
-    return saved && ALL_MONTHS.includes(saved) ? saved : DEFAULT_MONTH;
+    return saved && getAllMonths().includes(saved) ? saved : DEFAULT_MONTH;
   });
+  /**
+   * Months the order list and search are limited to. More than one can be picked, so
+   * a search can be narrowed to one month or widened across several. `viewingMonth`
+   * stays in step with the most recent pick, because the delivery, boxes and new-order
+   * screens still work from a single month.
+   */
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => [
+    localStorage.getItem("app_viewingMonth") || DEFAULT_MONTH,
+  ]);
+
+  /**
+   * True once a month has been tapped for the current search.
+   *
+   * A search starts by looking across every month, because the point of typing a name
+   * is to find that customer wherever they are. Tapping a month is what narrows it,
+   * and that first tap means "just this one" rather than "add to the month I happened
+   * to be viewing".
+   */
+  const [monthFilterTick, setMonthFilterTick] = useState(0);
+  const monthPickedForSearch = useRef(false);
+  const searchingRef = useRef(false);
+
+  const toggleMonth = useCallback((month: string) => {
+    const narrowingASearch = searchingRef.current && !monthPickedForSearch.current;
+    monthPickedForSearch.current = true;
+    setMonthFilterTick((n) => n + 1);
+
+    setSelectedMonths((prev) => {
+      // The first month tapped during a search replaces the selection, so results show
+      // that month alone. Tapping more adds them.
+      if (narrowingASearch) {
+        setViewingMonth(month);
+        return [month];
+      }
+      // Removing the last one would leave nothing to show, so a single selected month
+      // stays selected when tapped again.
+      if (prev.includes(month)) {
+        const next = prev.filter((m) => m !== month);
+        if (!next.length) return prev;
+        setViewingMonth(next[next.length - 1]);
+        return next;
+      }
+      setViewingMonth(month);
+      return [...prev, month];
+    });
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("app_activeTab", activeTab);
@@ -181,8 +233,16 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem("app_viewingMonth", viewingMonth);
+    // Keeps a month chosen somewhere else — a notification, or the month falling out
+    // of the available list — from leaving a stale multi-selection behind.
+    setSelectedMonths((prev) => (prev.includes(viewingMonth) ? prev : [viewingMonth]));
   }, [viewingMonth]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  // Surfaced on screen, so a failed load is never a silently blank page.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Held in state as well as the module registry so the month picker re-renders
+  // once a snapshot declares custom month names.
+  const [extraYearMonths, setExtraYearMonths] = useState<Record<string, string[]>>({});
   const autoTransitInFlightRef = useRef<Set<string>>(new Set());
   const [monthlyStats, setMonthlyStats] = useState<Record<string, MonthlyStats>>({});
   const [giftCards, setGiftCards] = useState<GiftCard[]>([]);
@@ -198,9 +258,23 @@ const Index: React.FC = () => {
   });
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const recentOrderPatchesRef = useRef<Record<string, { updates: Partial<Order>; at: number }>>({});
+  // The input is driven by searchQuery so every character appears immediately, while
+  // the lists read the deferred copy. React can then keep typing responsive and
+  // rebuild the results at a lower priority instead of blocking on each keystroke.
   const [searchQuery, setSearchQuery] = useState(
     () => localStorage.getItem("app_searchQuery") || "",
   );
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  // Typing, changing or clearing a search starts it wide again, so a month narrowed
+  // for a previous search cannot silently hide the next one's results.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    searchingRef.current = q.length > 0;
+    monthPickedForSearch.current = false;
+    setMonthFilterTick((n) => n + 1);
+  }, [searchQuery]);
+
   const [isSearchingAll, setIsSearchingAll] = useState(false);
   const [showCameraSearch, setShowCameraSearch] = useState(false);
 
@@ -216,8 +290,14 @@ const Index: React.FC = () => {
     localStorage.setItem(versionKey, CACHE_VERSION);
   }, []);
 
+  // localStorage writes are synchronous, so saving on every keystroke put a disk
+  // write in the middle of typing. The query only needs to survive a reload, so it
+  // is written once the typing stops.
   useEffect(() => {
-    localStorage.setItem("app_searchQuery", searchQuery);
+    const timer = window.setTimeout(() => {
+      localStorage.setItem("app_searchQuery", searchQuery);
+    }, 400);
+    return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
   useEffect(() => {
@@ -325,7 +405,16 @@ const Index: React.FC = () => {
     (json: ApiResponse, isBackground: boolean) => {
       if (json.status !== "success") return;
       const meta = json.meta || ({} as ApiResponse["meta"]);
-      setMonthlyStats(meta.monthly_stats || {});
+      // The sheet reports figures for every month it can see, but Supabase is the
+      // record for all of them except the live one. Only that month's totals are
+      // taken from the sheet; the rest keep the figures Supabase supplied.
+      setMonthlyStats((prev) => {
+        const merged = { ...prev };
+        for (const [month, stats] of Object.entries(meta.monthly_stats || {})) {
+          if (isLiveMonth(month)) merged[month] = stats;
+        }
+        return merged;
+      });
       const scriptActiveSheet = meta.active_sheet || DEFAULT_MONTH;
       const data = (Array.isArray(json.data) ? json.data : []).map((o) =>
         normalizeOrderFromSheet(o, scriptActiveSheet),
@@ -333,7 +422,7 @@ const Index: React.FC = () => {
       if (!isBackground) {
         if (
           !localStorage.getItem("app_viewingMonth") ||
-          !ALL_MONTHS.includes(localStorage.getItem("app_viewingMonth") || "")
+          !getAllMonths().includes(localStorage.getItem("app_viewingMonth") || "")
         ) {
           setViewingMonth(scriptActiveSheet);
         }
@@ -358,43 +447,78 @@ const Index: React.FC = () => {
 
   const fetchInitialData = useCallback(async () => {
     if (!role) return; // Don't fetch if not logged in
-    const cached = localStorage.getItem("app_initial_data");
-    let hasCached = false;
-    if (cached) {
-      try {
-        const json: ApiResponse = JSON.parse(cached);
-        applyApiResponse(json, false);
-        hasCached = true;
-        setLoading(false);
-      } catch (e) {
-        console.warn("Cache error", e);
-      }
-    }
-    if (!hasCached) setLoading(true);
 
+    // Supabase is the only source for history, and it answers in well under a
+    // second, so this is the one thing the first paint waits for.
     try {
-      const res = await fetchWithRetry(`${SCRIPT_URL}?t=${Date.now()}`);
-      const text = await res.text();
-      let json: ApiResponse | null = null;
-      try {
-        json = JSON.parse(text);
-      } catch (e) {
-        console.warn("Invalid JSON:", text.substring(0, 50));
-      }
-      if (json && json.status === "success") {
-        localStorage.setItem("app_initial_data", JSON.stringify(json));
-        applyApiResponse(json, hasCached);
-      }
-    } catch (err) {
-      console.error("Fetch error", err);
-    } finally {
+      const data = await loadOrders();
+      const { orders, months } = flattenOrders(data);
+
+      // Proof of what actually crosses into React state.
+      console.log(
+        `[state] setAllOrders <- ${orders.length} orders, ${months.length} months:`,
+        months.join(", "),
+      );
+
+      setMonthlyStats((prev) => ({ ...prev, ...data.stats }));
+      setAllOrders((prev) => {
+        const next = mergeOrders(prev, orders, months);
+        console.log(`[state] allOrders is now ${next.length}`);
+        return next;
+      });
+      setLoadedMonths((prev) => {
+        const next = new Set(prev);
+        // Only months Supabase owns are marked loaded; a live month stays unmarked so
+        // it is still fetched from the sheet.
+        months.filter((month) => !isLiveMonth(month)).forEach((month) => next.add(month));
+        return next;
+      });
+      setLoadError(null);
       setLoading(false);
+    } catch (error) {
+      const reason = error instanceof OrdersLoadError ? error.reason : "unreachable";
+      const message = error instanceof Error ? error.message : "Could not load orders.";
+      console.error(`[state] no orders reached the screen — ${reason}`);
+      setLoadError(message);
+      setLoading(false);
+
+      // A stale sign-in is the one failure the user can fix, so send them to the
+      // login screen instead of leaving an empty page with a toast.
+      if (reason === "no-session") {
+        localStorage.removeItem("auth_role");
+        setRole(null);
+        toast.error("Please sign in again.");
+        return;
+      }
+      toast.error(message);
     }
-  }, [applyApiResponse, role]);
+
+    // The live month comes from Apps Script, which takes around fifteen seconds.
+    // Deliberately not awaited: the app is already usable, and this fills July in
+    // when it arrives rather than holding the screen until it does.
+    void (async () => {
+      try {
+        const res = await fetchWithRetry(`${SCRIPT_URL}?t=${Date.now()}`);
+        const text = await res.text();
+        let json: ApiResponse | null = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          console.warn("Invalid JSON from the sheet:", text.substring(0, 50));
+        }
+        if (json && json.status === "success") applyApiResponse(json, true);
+      } catch (err) {
+        console.warn("Live month fetch failed; Supabase data still stands", err);
+      }
+    })();
+  }, [applyApiResponse, mergeOrders, role]);
 
   const fetchMonthData = useCallback(
     async (month: string, force = false) => {
       if (!role) return;
+      // Supabase is the record for every month except the live one, so the sheet is
+      // not consulted for the rest.
+      if (!isLiveMonth(month)) return;
       if (!force && loadedMonthsRef.current.has(month) && month !== viewingMonth) return;
       const cacheKey = `app_month_data_${month}`;
       const cached = localStorage.getItem(cacheKey);
@@ -539,6 +663,7 @@ const Index: React.FC = () => {
   const forceRefreshMonth = useCallback(
     async (month: string) => {
       if (!role) return;
+      if (!isLiveMonth(month)) return;
       // Clear stale cache
       localStorage.removeItem(`app_month_data_${month}`);
       localStorage.removeItem("app_initial_data");
@@ -646,6 +771,9 @@ const Index: React.FC = () => {
     (month?: string) => {
       if (!role) return;
       const target = month || viewingMonth;
+      // Owned months are served from the snapshot, so refreshing them would pull
+      // the sheet's rows back in behind the scenes.
+      if (!isLiveMonth(target)) return;
 
       if (refreshTimeoutRef.current[target]) {
         clearTimeout(refreshTimeoutRef.current[target]);
@@ -716,6 +844,24 @@ const Index: React.FC = () => {
       }
 
       try {
+        // Supabase first: if it refuses, the sheet is left alone and the order still
+        // exists in both places, so the delete can simply be retried. Deleting the
+        // sheet copy first is what left an unreachable row behind in Supabase.
+        const removed = await deleteOrderEverywhere("kurdistani", {
+          unique_order_id: orderToDelete?.unique_order_id,
+          sheet_name: sheetName,
+          id,
+        });
+        if (!removed.ok) {
+          toast.error(removed.error || "Could not delete from the database");
+          return;
+        }
+        if (removed.supabaseDeleted === 0) {
+          // Orders created before the linking key existed have no matching row, so
+          // say so rather than implying both copies are gone.
+          toast.warning("Removed from the sheet — no matching database row was found.");
+        }
+
         await fetchWithRetry(SCRIPT_URL, {
           method: "POST",
           body: JSON.stringify({
@@ -877,12 +1023,7 @@ const Index: React.FC = () => {
             order,
           );
         } else if (newStatus === "purchased") {
-          sendNotification(
-            "approve",
-            `Order purchased: ${order.name || order.insta}`,
-            role,
-            order,
-          );
+          sendNotification("approve", `Order purchased: ${order.name || order.insta}`, role, order);
         }
       }
 
@@ -897,6 +1038,23 @@ const Index: React.FC = () => {
           ...orderForStatus
         } = order as any;
         const currentSheetPrice = order.price ?? "";
+
+        // Supabase first, so the two copies cannot drift. A status lives in the
+        // `extra` tag as well as the status column, so both are sent.
+        const synced = await updateOrderEverywhere("kurdistani", order, {
+          extra: newExtra,
+          status: newStatus,
+        });
+        if (!synced.ok) {
+          toast.error(synced.error || "Could not save the status to the database");
+          return;
+        }
+        if (synced.supabaseUpdated === 0) {
+          // Not in Supabase yet — the sheet is still the working copy, so the change
+          // goes ahead rather than being blocked.
+          console.warn("Status saved to the sheet only; this order is not in Supabase yet");
+        }
+
         await fetchWithRetry(SCRIPT_URL, {
           method: "POST",
           body: JSON.stringify({
@@ -951,6 +1109,11 @@ const Index: React.FC = () => {
     if (!role) return;
     const unsub = subscribeOrderChanges(({ payload, sheet, row_id, action }) => {
       if (!sheet) return;
+      // The snapshot is the record for these months, so a live edit broadcast by
+      // another device must not add rows back into one.
+      // A realtime edit from another device only applies to the live month; every
+      // other month is read from Supabase.
+      if (!isLiveMonth(sheet)) return;
       const id = typeof row_id === "string" ? parseInt(row_id) || row_id : row_id;
       setAllOrders((prev) => {
         if (action === "delete") {
@@ -998,23 +1161,32 @@ const Index: React.FC = () => {
   );
 
   const filteredOrders = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const recentSearchMonths = new Set(getRecentSearchMonths(viewingMonth));
-    const recentSearchEntries = searchEntries.filter((e) =>
-      recentSearchMonths.has(e.order.sheet_name),
-    );
+    const q = deferredSearchQuery.trim().toLowerCase();
+
+    // A search looks across every month until a month is tapped: typing a name is for
+    // finding that customer wherever they are, and limiting it to the month on screen
+    // would hide the rest. Once a month is tapped it narrows to that month, and
+    // filtering before the text match keeps the matcher off the months being ignored.
+    const narrowed = !q || monthPickedForSearch.current;
+    const monthSet = new Set(selectedMonths);
+    const inChosenMonths = (order: Order) => !narrowed || monthSet.has(order.sheet_name);
+    const recentSearchEntries = narrowed
+      ? searchEntries.filter((e) => inChosenMonths(e.order))
+      : searchEntries;
+
     let list: Order[];
     if (STATUS_OPTIONS.includes(q as any)) {
-      list = sortedOrders.filter((o) => o.sheet_name === viewingMonth && getOrderStatus(o) === q);
+      list = sortedOrders.filter((o) => inChosenMonths(o) && getOrderStatus(o) === q);
     } else if (q === "pic")
       list = sortedOrders.filter(
         (o) =>
-          o.imageBase64 ||
-          o.image_url ||
-          o.primary_urls ||
-          getWarningImageSource(o as any) ||
-          o.proof_urls?.length ||
-          o.secondaryImages?.length,
+          inChosenMonths(o) &&
+          (o.imageBase64 ||
+            o.image_url ||
+            o.primary_urls ||
+            getWarningImageSource(o as any) ||
+            o.proof_urls?.length ||
+            o.secondaryImages?.length),
       );
     else if (q) {
       const orderNoMatch = q.match(/^order:\s*(.+)$/);
@@ -1043,9 +1215,9 @@ const Index: React.FC = () => {
               (e) => looseTextMatch(e.text, terms) || (qStripped && e.digits.includes(qStripped)),
             )
       ).map((e) => e.order);
-    } else list = sortedOrders.filter((o) => o.sheet_name === viewingMonth);
+    } else list = sortedOrders.filter(inChosenMonths);
     return list;
-  }, [sortedOrders, searchEntries, viewingMonth, searchQuery]);
+  }, [sortedOrders, searchEntries, selectedMonths, deferredSearchQuery, monthFilterTick]);
 
   const viewingMonthOrders = useMemo(
     () => sortedOrders.filter((o) => o.sheet_name === viewingMonth),
@@ -1053,7 +1225,7 @@ const Index: React.FC = () => {
   );
 
   const deliveryOrders = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = deferredSearchQuery.trim().toLowerCase();
     const isDeliveryOrder = (order: Order) =>
       order.sheet_name === viewingMonth &&
       (getOrderStatus(order) === "arrived" ||
@@ -1070,17 +1242,20 @@ const Index: React.FC = () => {
           (e.text.includes(q) || (qStripped && e.digits.includes(qStripped))),
       )
       .map((e) => e.order);
-  }, [sortedOrders, searchEntries, searchQuery, viewingMonth]);
+  }, [sortedOrders, searchEntries, deferredSearchQuery, viewingMonth]);
 
   const availableMonths = useMemo(() => {
-    return (YEARS_CONFIG[activeYear] || []).filter(
+    // extraYearMonths is not read directly — it is a dependency so the list
+    // recomputes when a snapshot introduces custom month names.
+    void extraYearMonths;
+    return getYearMonths(activeYear).filter(
       (m) =>
         m === activeMonth ||
         m === ACTIVE_ORDER_SHEET ||
         (monthlyStats[m]?.count || 0) > 0 ||
         allOrders.some((o) => o.sheet_name === m),
     );
-  }, [activeYear, activeMonth, monthlyStats, allOrders]);
+  }, [activeYear, activeMonth, monthlyStats, allOrders, extraYearMonths]);
 
   useEffect(() => {
     if (availableMonths.length > 0 && !availableMonths.includes(viewingMonth)) {
@@ -1096,6 +1271,25 @@ const Index: React.FC = () => {
   );
 
   const renderContent = () => {
+    // An empty screen used to be the only symptom of a failed load. Showing why, with
+    // a way to retry, means a database or sign-in problem is never mistaken for
+    // "there is no data".
+    if (loadError && allOrders.length === 0) {
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center py-20">
+          <div className="max-w-md space-y-4 rounded-2xl border border-border/80 bg-card p-6 text-center">
+            <h2 className="text-lg font-extrabold tracking-tight">Orders could not be loaded</h2>
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
     if (loading && allOrders.length === 0) {
       return (
         <div className="flex items-center justify-center py-20 min-h-[60vh]">
@@ -1125,6 +1319,7 @@ const Index: React.FC = () => {
           <DashboardView
             stats={monthlyStats[viewingMonth]}
             orders={viewingMonthOrders}
+            allOrders={allOrders}
             viewingMonth={viewingMonth}
             availableMonths={availableMonths}
             setViewingMonth={setViewingMonth}
@@ -1166,6 +1361,8 @@ const Index: React.FC = () => {
             activeYear={activeYear}
             setActiveYear={setActiveYear}
             availableMonths={availableMonths}
+            selectedMonths={selectedMonths}
+            onToggleMonth={toggleMonth}
             onStatusChange={handleStatusChange}
             onNewOrder={() => setActiveTab("new-order")}
             onUpdateOrder={handleUpdateOrder}
@@ -1213,20 +1410,16 @@ const Index: React.FC = () => {
       case "expenses":
         return <ExpensesView />;
       case "gift-cards":
-        return (
-          <GiftCardsView
-            role={role!}
-            giftCards={giftCards}
-            onRefresh={fetchGiftCards}
-            orders={allOrders.filter((o) => o.sheet_name === viewingMonth)}
-            viewingMonth={viewingMonth}
-            backendIsLegacy={giftCardsBackendIsLegacy}
-          />
-        );
+        // The Supabase screen. The old one read gift cards through Apps Script, which has
+        // no handler for them, so it showed a balance of zero and a warning about the
+        // deployment being out of date. Cards live in the database now.
+        return <GiftCardManagerView />;
       case "calculator":
         return <CalculatorView />;
       case "messages":
         return <MessagesView role={role!} allOrders={allOrders} profileMode={currentSystem} />;
+      case "team-performance":
+        return <TeamPerformanceView />;
       case "team":
         return (
           <TeamView
@@ -1240,6 +1433,7 @@ const Index: React.FC = () => {
             setActiveYear={setActiveYear}
             availableMonths={availableMonths}
             onOrderClick={setSelectedOrder}
+            onOpenPerformance={() => setActiveTab("team-performance")}
           />
         );
       default:
@@ -1249,6 +1443,10 @@ const Index: React.FC = () => {
 
   const handleLogout = () => {
     localStorage.removeItem("auth_role");
+    // The Supabase session outlives a reload by design, so it has to be ended here
+    // too — otherwise the next person on this device is still signed in to the
+    // database even though the app looks logged out.
+    supabase.auth.signOut().catch((error) => console.warn("Sign out failed", error));
     setRole(null);
   };
 

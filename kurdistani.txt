@@ -957,7 +957,7 @@ function relinkOrderRefs(targetRow, targetSheetName, linkedRefs) {
 }
 
 function getNextOrderRow(sheet) {
-  var startRow = 4;
+  var startRow = 6;
   var lastRowInSheet = sheet.getLastRow();
   if (lastRowInSheet > MAX_ROW_LIMIT) lastRowInSheet = MAX_ROW_LIMIT;
   var targetRow = startRow;
@@ -974,7 +974,7 @@ function getNextOrderRow(sheet) {
 
 function findRowByClientRequestId(sheet, clientRequestId) {
   if (!sheet || !clientRequestId) return -1;
-  var startRow = 4;
+  var startRow = 6;
   var lastRow = Math.min(sheet.getLastRow(), MAX_ROW_LIMIT);
   if (lastRow < startRow) return -1;
   var values = sheet.getRange(startRow, 30, lastRow - startRow + 1, 1).getValues();

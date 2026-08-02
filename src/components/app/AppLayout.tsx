@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   LayoutDashboard,
   Users,
+  TrendingUp,
   ShoppingCart,
   Package,
   Truck,
@@ -17,6 +18,8 @@ import {
   Plus,
   Wallet,
   CreditCard,
+  Ticket,
+  KeyRound,
 } from "lucide-react";
 import { YEARS_CONFIG } from "@/types";
 
@@ -62,6 +65,7 @@ const ALL_MENU_ITEMS = [
   { id: "new-order", label: "New Order", icon: Plus },
   { id: "delivery", label: "Delivery", icon: Truck },
   { id: "team", label: "Team", icon: Users },
+  { id: "team-performance", label: "Performance", icon: TrendingUp },
 ];
 
 const AppLayout: React.FC<AppLayoutProps> = ({
@@ -178,7 +182,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         item.id === "batches" ||
         item.id === "new-order" ||
         item.id === "messages" ||
-        item.id === "team"
+        item.id === "team" ||
+        item.id === "team-performance" ||
+        item.id === "gift-cards"
       );
     }
     if (role === "delivery") {
@@ -191,6 +197,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
     }
     return item.id === "calculator";
   });
+  // The bottom bar is the only navigation on a phone, so it is kept short. The
+  // performance report is reached from inside the Team page rather than taking a slot
+  // here.
   const mobileTabIds = ["dashboard", "calculator", "expenses", "gift-cards", "team"];
   const mobileMenuItems = mobileTabIds
     .map((id) => menuItems.find((item) => item.id === id))

@@ -32,12 +32,28 @@ export interface Order {
   unique_order_id?: string;
   admin_name?: string;
   admin_role?: string;
+  /**
+   * The month and year the order belongs to, as stored in Supabase. Kept because the
+   * imported 2025 rows have these but no date, so they are the only way to place those
+   * orders on a monthly chart.
+   */
+  order_month?: string;
+  order_year?: number;
+  /** Who created the order. staff_id is the Supabase user id the policies match on. */
+  staff_id?: string;
+  staff_name?: string;
+  staff_role?: string;
   sku?: string;
   verified?: boolean;
   missing?: boolean;
   status?: OrderStatus;
   is_finished?: boolean;
   _fromSheet?: boolean;
+  /**
+   * Set on rows that came from the local snapshot rather than Apps Script. A
+   * cleared month hides sheet rows but must still show data imported on purpose.
+   */
+  _fromSnapshot?: boolean;
 }
 
 export interface MonthlyStats {

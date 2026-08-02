@@ -46,6 +46,8 @@ import {
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { getWarningImageSource } from "@/lib/warning-image";
 import OrderFormView from "./OrderFormView";
+import { deleteOrderEverywhere } from "@/lib/submitOrder";
+import { toast } from "sonner";
 
 interface Props {
   order: Order;
@@ -60,9 +62,11 @@ interface Props {
 }
 
 const getOrderSenderLabel = (order: Order) => {
-  const senderName = String(order.admin_name || "").trim();
+  // staff_name is the field going forward; admin_name is read as a fallback so
+  // orders created before the change still show who took them.
+  const senderName = String(order.staff_name || order.admin_name || "").trim();
   if (!senderName) return "";
-  const senderRole = String(order.admin_role || "").trim();
+  const senderRole = String(order.staff_role || order.admin_role || "").trim();
   return senderRole ? `${senderName} (${senderRole})` : senderName;
 };
 
@@ -107,7 +111,9 @@ const OrderDetailModal: React.FC<Props> = ({
   const order = activeOrder;
   const viewerRole = typeof window !== "undefined" ? localStorage.getItem("auth_role") || "" : "";
   const canChangeStatus = viewerRole !== "moderator";
-  const canViewSubmittedBy = viewerRole === "owner" || viewerRole === "admin";
+  // Everyone sees who created an order. It was owner/admin only, which meant the
+  // staff who take the orders could not see their own name on them.
+  const canViewSubmittedBy = true;
   const senderLabel = canViewSubmittedBy ? getOrderSenderLabel(order) : "";
 
   React.useEffect(() => {
@@ -152,6 +158,22 @@ const OrderDetailModal: React.FC<Props> = ({
         } catch (e) {
           console.error("Failed unlink before delete", e);
         }
+      }
+
+      // Supabase first. This screen used to delete straight from the sheet, which
+      // left the Supabase copy behind with no way to reach it. Failing here stops the
+      // whole delete, so the order stays in both places and can be retried.
+      const removed = await deleteOrderEverywhere("kurdistani", {
+        unique_order_id: order.unique_order_id,
+        sheet_name: order.sheet_name,
+        id: order.id,
+      });
+      if (!removed.ok) {
+        toast.error(removed.error || "Could not delete from the database");
+        return;
+      }
+      if (removed.supabaseDeleted === 0) {
+        toast.warning("Removing from the sheet — no matching database row was found.");
       }
 
       const res = await fetchWithRetry(SCRIPT_URL, {

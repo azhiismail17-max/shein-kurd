@@ -29,6 +29,9 @@ export interface Order {
   imageBase64?: string;
   secondaryImages?: string[];
   linkedOrderIds?: (string | number)[];
+  /** Month and year columns from Supabase, used to chart orders that have no date. */
+  order_month?: string;
+  order_year?: number;
   unique_order_id?: string;
   admin_name?: string;
   admin_role?: string;

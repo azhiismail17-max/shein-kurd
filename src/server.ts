@@ -70,7 +70,8 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
-      if (new URL(request.url).pathname === "/api/push") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === "/api/push") {
         return await handlePushRequest(request);
       }
 

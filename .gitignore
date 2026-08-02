@@ -34,3 +34,11 @@ dist-ssr
 .vercel
 .env*
 test-results/
+
+# Customer data — never commit or publish
+data/orders-snapshot.json
+*.xlsx
+*.xls
+*.csv
+.env
+.env*.local

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Users, User, Shield, Search, Package, Activity } from "lucide-react";
+import { Users, User, Shield, Search, Package, Activity, TrendingUp } from "lucide-react";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { Order } from "@/types";
 import { normalizeTeamUsername } from "@/lib/teamActivity";
@@ -25,6 +25,8 @@ interface TeamViewProps {
   setActiveYear: (year: string) => void;
   availableMonths: string[];
   onOrderClick?: (order: Order) => void;
+  /** Opens the performance report, which is where the by-date breakdown lives. */
+  onOpenPerformance?: () => void;
 }
 
 export default function TeamView({
@@ -38,6 +40,7 @@ export default function TeamView({
   setActiveYear,
   availableMonths,
   onOrderClick,
+  onOpenPerformance,
 }: TeamViewProps) {
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +117,16 @@ export default function TeamView({
           <p className="text-muted-foreground text-sm mt-1">
             View profiles, access, and {viewingMonth} orders.
           </p>
+          {onOpenPerformance && (
+            <button
+              type="button"
+              onClick={onOpenPerformance}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary ring-1 ring-primary/20 transition-colors hover:bg-primary/15"
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              Orders by date report
+            </button>
+          )}
         </div>
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
