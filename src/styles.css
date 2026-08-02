@@ -71,14 +71,22 @@
   min-height: 62px;
   padding: 5px;
   border: 1px solid hsl(var(--border) / .76);
-  border-radius: 20px;
-  background: linear-gradient(180deg, hsl(var(--card) / .96), hsl(var(--card) / .9));
-  box-shadow: 0 18px 48px hsl(220 40% 18% / .18), inset 0 1px 0 hsl(0 0% 100% / .62);
-  backdrop-filter: blur(22px) saturate(1.25);
+  border-radius: 22px;
+  background: linear-gradient(180deg, hsl(var(--card) / .97), hsl(var(--card) / .92));
+  /*
+   * Was a 48px blur at 18% opacity, which put a grey cloud across the bottom of every
+   * screen on a phone. Tighter and warmer: it lifts off the page without smudging it.
+   */
+  box-shadow:
+    0 2px 6px hsl(25 18% 10% / .06),
+    0 14px 34px -12px hsl(25 18% 10% / .22),
+    inset 0 1px 0 hsl(0 0% 100% / .55);
+  backdrop-filter: blur(24px) saturate(1.4);
 }
 
 .mobile-tabbar button {
   display: flex;
+  letter-spacing: -0.01em;
   min-width: 0;
   align-items: center;
   justify-content: center;
@@ -130,21 +138,44 @@
       linear-gradient(180deg, hsl(var(--background)), hsl(var(--surface-sunken)));
   }
 
+  /* The top bar. Lighter blur and a hairline, so it separates without becoming a slab. */
   .glass-surface {
-    border-bottom: 1px solid hsl(var(--border) / .65);
-    background: hsl(var(--background) / .88);
-    backdrop-filter: blur(18px) saturate(1.2);
+    border-bottom: 1px solid hsl(var(--border) / .7);
+    background: hsl(var(--background) / .82);
+    backdrop-filter: blur(20px) saturate(1.35);
   }
 
   /* Consistent, readable cards across orders, gifts, expenses and team. */
+  /*
+   * Two shadows, not one.
+   *
+   * A single wide blur makes a card look like it is floating an inch off the page. A tight
+   * contact shadow plus a soft wide one is how a real object sits on a surface: the first
+   * says the edge is touching, the second gives it height. Both are warm now — the old one
+   * was blue-black, which greyed the paper underneath it.
+   */
   main .bg-card,
   main .bg-white {
-    border-radius: 18px;
-    box-shadow: 0 6px 24px hsl(224 35% 10% / .055);
+    border-radius: 20px;
+    box-shadow:
+      0 1px 2px hsl(25 18% 10% / .05),
+      0 10px 28px -10px hsl(25 18% 10% / .1);
   }
 
-  main h1 { font-size: 1.35rem; line-height: 1.2; letter-spacing: -.035em; }
-  main h2 { letter-spacing: -.025em; }
+  main h1 { font-size: 1.4rem; line-height: 1.15; letter-spacing: -.04em; }
+  main h2 { letter-spacing: -.028em; }
+
+  /*
+   * A focus ring you can actually see.
+   *
+   * Nothing defined one, so keyboard focus fell back to whatever the browser draws, which
+   * on a white card is close to invisible. Only :focus-visible, so it appears for the
+   * keyboard and never as a ring left behind by a tap.
+   */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring) / .55);
+    outline-offset: 2px;
+  }
   main input, main select, main textarea { min-height: 46px; }
 
   [role="dialog"] {
@@ -155,34 +186,51 @@
   }
 }
 
+/*
+ * The palette runs warm.
+ *
+ * Every neutral used to be mixed with blue — a 210 hue background against white cards,
+ * which is the look every admin template ships with and makes the shop's own deep red sit
+ * on it like a sticker. These neutrals carry a trace of the brand's red instead, so white
+ * cards read as lifted off warm paper and the red belongs to the page rather than fighting
+ * it. Same structure, same contrast, different temperature.
+ */
 :root {
-    --background: 210 28% 97%;
-    --foreground: 225 26% 12%;
+    --background: 32 20% 97%;
+    --foreground: 25 16% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 225 26% 12%;
+    --card-foreground: 25 16% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 225 26% 12%;
-    --primary: 173 72% 28%;
+    --popover-foreground: 25 16% 12%;
+    /* #6b0f14, the shop's own red. The default was a teal that appeared nowhere else. */
+    --primary: 356 76% 24%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 22% 93%;
-    --secondary-foreground: 225 21% 16%;
-    --muted: 214 26% 94%;
-    --muted-foreground: 220 12% 43%;
-    --accent: 226 62% 45%;
+    --secondary: 32 17% 93%;
+    --secondary-foreground: 25 18% 16%;
+    --muted: 32 16% 94.5%;
+    --muted-foreground: 28 9% 42%;
+    /* Brass, not blue. A blue accent beside a maroon primary reads as two brands. */
+    --accent: 36 68% 41%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 70% 48%;
+    /*
+     * Brighter and further round the wheel than the primary. With the primary now a deep
+     * red, a destructive red at the same lightness would make Delete and Save look alike;
+     * this one is unmistakably a warning next to the dark brand colour.
+     */
+    --destructive: 4 76% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 215 22% 87%;
-    --input: 215 22% 87%;
-    --ring: 173 72% 28%;
-    --radius: 0.875rem;
+    --border: 30 15% 88%;
+    --input: 30 15% 88%;
+    --ring: 356 76% 24%;
+    /* Softer corners throughout. 0.875rem read a little severe on the dense tables. */
+    --radius: 1rem;
 
-    --emerald-glow: 173 72% 28%;
+    --emerald-glow: 356 76% 24%;
     --surface-elevated: 0 0% 100%;
-    --surface-sunken: 214 25% 92%;
-    --text-primary: 225 26% 12%;
-    --text-secondary: 220 12% 43%;
-    --text-tertiary: 218 10% 58%;
+    --surface-sunken: 32 17% 92%;
+    --text-primary: 25 16% 12%;
+    --text-secondary: 28 9% 42%;
+    --text-tertiary: 28 7% 57%;
     --status-pending: 38 92% 50%;
     --status-approved: 217 91% 60%;
     --status-arrived: 271 91% 65%;
@@ -192,43 +240,54 @@
     --box-locked-bg: 142 71% 96%;
     --box-pending-bg: 38 92% 96%;
 
-    --sidebar-background: 223 33% 12%;
-    --sidebar-foreground: 214 22% 78%;
-    --sidebar-primary: 173 72% 40%;
+    /* Warm charcoal rather than navy, so the rail belongs to the same room as the page. */
+    --sidebar-background: 24 12% 10%;
+    --sidebar-foreground: 30 10% 76%;
+    --sidebar-primary: 356 68% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 221 24% 18%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 24% 22%;
-    --sidebar-ring: 173 72% 40%;
+    --sidebar-accent: 24 10% 17%;
+    --sidebar-accent-foreground: 32 20% 97%;
+    --sidebar-border: 24 9% 21%;
+    --sidebar-ring: 356 68% 50%;
 }
 
+/*
+ * Dark mode is charcoal, not navy.
+ *
+ * The old dark theme was blue enough to look like a different product from the light one.
+ * These are the same warm neutrals turned down.
+ *
+ * The brand red is lifted from 24% to 52% lightness here. A colour that dark on a dark
+ * background is unreadable — the button would have been a shape you could not see the text
+ * on. Same hue, enough lightness to carry white type.
+ */
 .dark {
-    --background: 222 30% 8%;
-    --foreground: 210 40% 98%;
-    --card: 222 24% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 8%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 164 72% 40%;
-    --primary-foreground: 222 30% 8%;
-    --secondary: 220 22% 16%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 220 22% 15%;
-    --muted-foreground: 215 16% 65%;
-    --accent: 202 76% 48%;
-    --accent-foreground: 222 30% 8%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 17% 22%;
-    --input: 220 17% 22%;
-    --ring: 164 72% 40%;
+    --background: 24 9% 7%;
+    --foreground: 32 18% 96%;
+    --card: 24 8% 10.5%;
+    --card-foreground: 32 18% 96%;
+    --popover: 24 9% 9%;
+    --popover-foreground: 32 18% 96%;
+    --primary: 356 68% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 24 8% 15.5%;
+    --secondary-foreground: 32 18% 96%;
+    --muted: 24 8% 14.5%;
+    --muted-foreground: 30 9% 62%;
+    --accent: 36 72% 52%;
+    --accent-foreground: 24 9% 7%;
+    --destructive: 4 72% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 24 7% 20%;
+    --input: 24 7% 20%;
+    --ring: 356 68% 52%;
 
-    --emerald-glow: 160 84% 39%;
-    --surface-elevated: 222 24% 13%;
-    --surface-sunken: 222 30% 7%;
-    --text-primary: 210 40% 98%;
-    --text-secondary: 215 20% 55%;
-    --text-tertiary: 215 14% 40%;
+    --emerald-glow: 356 68% 52%;
+    --surface-elevated: 24 8% 12.5%;
+    --surface-sunken: 24 10% 5.5%;
+    --text-primary: 32 18% 96%;
+    --text-secondary: 30 9% 62%;
+    --text-tertiary: 28 7% 44%;
     --status-pending: 38 92% 50%;
     --status-approved: 217 91% 60%;
     --status-arrived: 271 91% 65%;
@@ -238,14 +297,14 @@
     --box-locked-bg: 142 71% 10%;
     --box-pending-bg: 38 92% 10%;
 
-    --sidebar-background: 222 30% 8%;
-    --sidebar-foreground: 215 16% 67%;
-    --sidebar-primary: 164 72% 40%;
-    --sidebar-primary-foreground: 222 30% 8%;
-    --sidebar-accent: 220 22% 16%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 17% 22%;
-    --sidebar-ring: 164 72% 40%;
+    --sidebar-background: 24 10% 6%;
+    --sidebar-foreground: 30 9% 64%;
+    --sidebar-primary: 356 68% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 24 8% 14%;
+    --sidebar-accent-foreground: 32 18% 96%;
+    --sidebar-border: 24 7% 18%;
+    --sidebar-ring: 356 68% 52%;
 }
 
 .iraqi-theme {
@@ -298,7 +357,18 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    /*
+     * Every digit the same width, everywhere.
+     *
+     * This is a shop's books. Prices, remaining balances and box costs sit in columns, and
+     * with proportional digits a 1 is narrower than a 0, so the columns wander and totals
+     * are hard to scan. It was being asked for class by class and missed in plenty of
+     * places; here it is simply true of the whole page.
+     */
+    font-variant-numeric: tabular-nums;
+    /* Inter sets a little loose at text sizes. */
+    letter-spacing: -0.011em;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

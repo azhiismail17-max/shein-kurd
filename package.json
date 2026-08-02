@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "snapshot": "esbuild scripts/build-snapshot.ts --bundle --platform=node --format=esm --alias:@=./src --outfile=node_modules/.cache/build-snapshot.mjs --log-level=error && node node_modules/.cache/build-snapshot.mjs",
     "migrate": "esbuild scripts/migrate-to-supabase.ts --bundle --platform=node --format=esm --alias:@=./src --outfile=node_modules/.cache/migrate.mjs --log-level=error && node node_modules/.cache/migrate.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
@@ -52,8 +51,7 @@
     "tesseract.js": "^7.0.0",
     "tw-animate-css": "^1.3.4",
     "vite-tsconfig-paths": "^6.0.2",
-    "web-push": "^3.6.7",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
