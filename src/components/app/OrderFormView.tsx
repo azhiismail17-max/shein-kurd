@@ -679,7 +679,12 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
           }
 
           if (result.sheetError) {
-            toast.warning("Saved, but not yet editable — the sheet copy failed.");
+            // The real message, not a guess at it. This branch is reached both when the
+            // sheet write fails and when Supabase refuses the row, and it used to blame
+            // the sheet either way — so an order that never reached the database was
+            // reported as a sheet problem and looked harmless.
+            toast.warning(result.sheetError, { duration: 10000 });
+            console.error("[order] saved with a problem:", result.sheetError);
           } else if (result.sheetRowId) {
             // Swap the temporary id for the sheet's real row number so the order can
             // be opened and edited straight away.

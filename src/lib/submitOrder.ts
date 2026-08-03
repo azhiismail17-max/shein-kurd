@@ -170,6 +170,9 @@ export function buildOrderRow(
   const sheetOf = branch === "iraqi" ? getIraqiSheet : getCurrentOrderSheet;
 
   return {
+    // Filled in by insertOrder once the sheet has assigned one. Declared here so the
+    // type will not let a row be built without deciding what it should be.
+    sheet_row: null,
     date: wallClockStamp(now),
     insta: text(form.insta),
     name: text(form.name),
@@ -351,6 +354,9 @@ async function insertOrder(
 
   const linked: OrderInsert = {
     ...row,
+    // The whole point of writing the sheet first. Without this the row is stored with a
+    // null sheet_row, loadOrders skips it, and the order only ever appears in the sheet.
+    sheet_row: sheetRowId,
     staff_id: staff.id,
     // The profile is the source of truth; the values the form passed are only used
     // if the profile could not be read.

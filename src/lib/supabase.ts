@@ -52,6 +52,15 @@ export type Branch = keyof typeof ORDERS_TABLE;
  * being ignored.
  */
 export interface OrderInsert {
+  /**
+   * The order's row number in the Google Sheet.
+   *
+   * Not optional by accident — it is the handle every edit and delete uses to find an
+   * order, and `loadOrders` throws away any row that has none. An insert that omitted it
+   * landed in the table and was then invisible in the app, which is exactly what happened
+   * to new orders: written to Supabase, skipped on the way back out.
+   */
+  sheet_row: number | null;
   date: string | null;
   insta: string | null;
   name: string | null;
