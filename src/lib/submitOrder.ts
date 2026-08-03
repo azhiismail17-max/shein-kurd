@@ -558,11 +558,38 @@ export function submitKurdistaniOrder(
   return insertOrder(form, ctx, "kurdistani", mirror);
 }
 
-/** Iraqi orders — Supabase table plus the Iraqi sheet. */
+/**
+ * Whether the Iraqi branch may take new orders.
+ *
+ * Closed. Every order goes to the Kurdistani table, and the Iraqi one is empty on purpose —
+ * its orders were moved across. Flip this to true to reopen it; nothing else needs changing.
+ */
+export const IRAQI_ORDERS_OPEN = false;
+
+/**
+ * Iraqi orders — refused while the branch is closed.
+ *
+ * The refusal lives here rather than in the form, because this is the single door every
+ * Iraqi order has to come through. Hiding a button would leave the door open behind it.
+ */
 export function submitIraqiOrder(
   form: OrderFormValues,
   ctx: SubmitContext,
   mirror?: SheetMirrorOptions,
-) {
+): Promise<SubmitResult> {
+  if (!IRAQI_ORDERS_OPEN) {
+    const message =
+      "The Iraqi branch is closed. Every order goes to Kurdistani — place it there instead.";
+    console.warn(`[orders_iraqi] refused: ${message}`);
+    // Nothing is written anywhere: no Supabase row and no sheet row, so a refused order
+    // cannot leave half a record behind.
+    return Promise.resolve({
+      ok: false,
+      row: null,
+      error: message,
+      sheetRowId: null,
+      sheetError: null,
+    });
+  }
   return insertOrder(form, ctx, "iraqi", mirror);
 }

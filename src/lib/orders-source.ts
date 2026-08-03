@@ -133,25 +133,44 @@ export function loadOrders(): Promise<OrdersData> {
       }
 
       const months: Record<string, Order[]> = {};
-      let skippedNoRow = 0;
+      let withoutSheetRow = 0;
 
       for (const row of rows) {
         const month = String(row.order_month || "");
         if (!month) continue;
-        if (row.sheet_row === null || row.sheet_row === undefined) {
-          skippedNoRow += 1;
-          continue;
-        }
+
+        /*
+         * An order with no sheet row is kept.
+         *
+         * It used to be thrown away, on the reasoning that every edit and delete finds an
+         * order in the sheet by row number, so a row without one was not safely editable.
+         * The effect was worse than the problem: orders that existed in Supabase simply did
+         * not appear, and nothing on screen said why. Supabase is where the orders live now,
+         * so the database is what decides whether an order exists.
+         *
+         * The key stands in for the row number when there is none. Deletes already match on
+         * unique_order_id first, and edits write to Supabase, so an order without a sheet
+         * row is still fully usable — it just has no counterpart in the old sheet.
+         */
+        const sheetRow = row.sheet_row;
+        const hasSheetRow = sheetRow !== null && sheetRow !== undefined;
+        if (!hasSheetRow) withoutSheetRow += 1;
+        const id = hasSheetRow
+          ? (sheetRow as number)
+          : String(row.unique_order_id || `${month}-${row.insta ?? ""}-${row.price ?? ""}`);
         // The database column is snake_case; the app reads camelCase everywhere.
         const links = row.linked_order_ids;
         (months[month] ??= []).push({
           ...(row as unknown as Order),
-          id: row.sheet_row as number,
+          id,
           sheet_name: month,
           linkedOrderIds: Array.isArray(links)
             ? (links as (string | number)[])
             : typeof links === "string" && links.trim()
-              ? links.split(",").map((part) => part.trim()).filter(Boolean)
+              ? links
+                  .split(",")
+                  .map((part) => part.trim())
+                  .filter(Boolean)
               : undefined,
           _fromSheet: true,
         });
@@ -160,8 +179,11 @@ export function loadOrders(): Promise<OrdersData> {
       const stats: Record<string, MonthlyStats> = {};
       for (const [month, list] of Object.entries(months)) stats[month] = statsFor(list);
 
-      if (skippedNoRow) {
-        console.warn(`[orders] ${skippedNoRow} row(s) skipped: no sheet_row, not safely editable`);
+      if (withoutSheetRow) {
+        console.info(
+          `[orders] ${withoutSheetRow} order(s) have no sheet row and are keyed by their id — ` +
+            "shown as normal, but they have no row in the old Google Sheet",
+        );
       }
       console.info(
         `[orders] ${rows.length} orders from Supabase in ${Date.now() - started}ms — ` +
