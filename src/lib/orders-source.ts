@@ -106,25 +106,58 @@ export function loadOrders(): Promise<OrdersData> {
       const page = 1000;
       const started = Date.now();
 
-      try {
-        for (let from = 0; ; from += page) {
-          const { data, error } = await supabase
-            .from(ORDERS_TABLE.kurdistani)
-            .select(COLUMNS)
-            .order("id", { ascending: true })
-            .range(from, from + page - 1);
+      /** Turns a Supabase error into the right kind of OrdersLoadError. */
+      const readFailed = (message: string, code?: string) => {
+        console.error(`[orders] Supabase read failed: ${message} (${code})`);
+        return new OrdersLoadError(
+          code === "42501" ? "denied" : "unreachable",
+          code === "42501"
+            ? "This account is not allowed to read orders. Check its profile row."
+            : `Could not read orders: ${message}`,
+        );
+      };
 
-          if (error) {
-            console.error(`[orders] Supabase read failed: ${error.message} (${error.code})`);
-            throw new OrdersLoadError(
-              error.code === "42501" ? "denied" : "unreachable",
-              error.code === "42501"
-                ? "This account is not allowed to read orders. Check its profile row."
-                : `Could not read orders: ${error.message}`,
-            );
-          }
-          rows.push(...((data ?? []) as unknown as Record<string, unknown>[]));
-          if (!data || data.length < page) break;
+      const readPage = async (from: number) => {
+        const { data, error } = await supabase
+          .from(ORDERS_TABLE.kurdistani)
+          .select(COLUMNS)
+          .order("id", { ascending: true })
+          .range(from, from + page - 1);
+        if (error) throw readFailed(error.message, error.code);
+        return (data ?? []) as unknown as Record<string, unknown>[];
+      };
+
+      try {
+        /*
+         * The pages are fetched at the same time, not one after another.
+         *
+         * Supabase caps a read at 1,000 rows, so 2,042 orders take three requests. Asking
+         * for them in a loop meant each one waited for the one before it — three round
+         * trips to another continent, about 2.5 seconds before the app had any orders at
+         * all. The first request also asks for the exact count, which is what makes it
+         * possible to work out the remaining ranges and ask for them together, so the cost
+         * is roughly one round trip instead of three.
+         */
+        const first = await supabase
+          .from(ORDERS_TABLE.kurdistani)
+          .select(COLUMNS, { count: "exact" })
+          .order("id", { ascending: true })
+          .range(0, page - 1);
+
+        if (first.error) throw readFailed(first.error.message, first.error.code);
+        rows.push(...((first.data ?? []) as unknown as Record<string, unknown>[]));
+
+        const total = first.count ?? rows.length;
+        const offsets: number[] = [];
+        for (let from = page; from < total; from += page) offsets.push(from);
+
+        if (offsets.length) {
+          // Promise.all keeps the results in the order the promises were given, so
+          // concatenating them rebuilds exact id order without sorting. Sorting here would
+          // have been wrong as well as unnecessary: sheet_row is not the id, and ordering by
+          // it would interleave the months differently from how the rows were read.
+          const rest = await Promise.all(offsets.map(readPage));
+          for (const chunk of rest) rows.push(...chunk);
         }
       } catch (error) {
         if (error instanceof OrdersLoadError) throw error;
