@@ -288,6 +288,20 @@ async function mirrorToSheet(
  * the sheet accepts it but Supabase does not, the order is reported as saved with
  * `sheetError` explaining that Supabase is missing its copy.
  */
+/**
+ * Saves an order: Supabase first, then the sheet.
+ *
+ * The order used to go to the sheet first, because the sheet was the only thing that could
+ * assign a row number and that number was how every later edit and delete found the order.
+ * The consequence was that a slow or broken sheet meant the order was not saved at all — and
+ * worse, the row number never made it onto the Supabase row, so orders landed in the database
+ * and were then skipped on the way back out.
+ *
+ * Supabase is the record now. The order is written there and exists from that moment. The
+ * sheet is a copy made afterwards, and if it fails the order is still saved — the row number
+ * is simply written back later, or not at all. Losing the copy is an inconvenience; losing
+ * the order is not acceptable.
+ */
 async function insertOrder(
   form: OrderFormValues,
   ctx: SubmitContext,
@@ -303,48 +317,11 @@ async function insertOrder(
     return { ok: false, row: null, error: message, sheetRowId: null, sheetError: null };
   }
 
-  // The sheet is written first so its row number can be stored on the Supabase row.
-  // That number is the only handle the app has on an order — every edit and delete
-  // finds it by month and row — and it does not exist until the sheet assigns it.
-  // Inserting into Supabase first would leave a row with no way to match it back,
-  // which is exactly why a deleted order stayed behind in Supabase.
-  // Generated before either write so both copies agree on it no matter what the
-  // sheet replies with. This is what a later edit or delete matches on.
+  // Made here, before either write, so both copies carry the same key whatever the sheet
+  // replies with. This is what a later edit or delete matches on.
   const orderKey =
     globalThis.crypto?.randomUUID?.() ??
     `${branch}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-  let sheetRowId: number | null = null;
-  let sheetKey: string | null = null;
-  if (mirror.sheetPayload) {
-    const scriptUrl = branch === "iraqi" ? IRAQI_SCRIPT_URL : SCRIPT_URL;
-    try {
-      const mirrored = await mirrorToSheet(
-        scriptUrl,
-        mirror.sheetPayload,
-        row.order_month,
-        mirror.primaryUrls ?? [],
-        orderKey,
-      );
-      if (mirrored.error) {
-        console.error(`[${table}] sheet write failed, nothing saved:`, mirrored.error);
-        return {
-          ok: false,
-          row: null,
-          error: mirrored.error,
-          sheetRowId: null,
-          sheetError: mirrored.error,
-        };
-      }
-      sheetRowId = mirrored.rowId;
-      sheetKey = mirrored.uniqueOrderId;
-      console.log(`[${table}] sheet row ${sheetRowId} in ${row.order_month}, key ${sheetKey}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[${table}] sheet write failed, nothing saved:`, message);
-      return { ok: false, row: null, error: message, sheetRowId: null, sheetError: message };
-    }
-  }
 
   // Who is signed in, straight from the session and their profile.
   const staff = await getActiveStaff();
@@ -354,46 +331,92 @@ async function insertOrder(
 
   const linked: OrderInsert = {
     ...row,
-    // The whole point of writing the sheet first. Without this the row is stored with a
-    // null sheet_row, loadOrders skips it, and the order only ever appears in the sheet.
-    sheet_row: sheetRowId,
+    // Filled in below once the sheet has assigned one. An order without a sheet row is
+    // still shown and still editable — loadOrders keys it by its id instead.
+    sheet_row: null,
     staff_id: staff.id,
-    // The profile is the source of truth; the values the form passed are only used
-    // if the profile could not be read.
+    // The profile is the source of truth; the values the form passed are only used if the
+    // profile could not be read.
     staff_name: staff.name ?? row.staff_name,
     staff_role: staff.role ?? row.staff_role,
-    unique_order_id: sheetKey ?? orderKey,
+    unique_order_id: orderKey,
   };
-  console.log(
-    `[${table}] recorded by ${linked.staff_name ?? "unknown"} (${linked.staff_role ?? "?"})`,
-  );
 
+  // ---- 1. Supabase. If this fails, nothing is saved anywhere. ----
   const { error } = await supabase.from(table).insert(linked);
-
   if (error) {
-    // code and hint name the failing policy or missing column, separating "the
-    // table rejected this" from "the request never arrived".
-    console.error(`[${table}] insert failed:`, error.message, {
+    // code and hint name the failing policy or missing column, separating "the table
+    // rejected this" from "the request never arrived".
+    console.error(`[${table}] insert failed, nothing saved:`, error.message, {
       code: error.code,
       details: error.details,
       hint: error.hint,
     });
-    // The sheet already has it, so the order is usable — but Supabase is missing a
-    // copy, and saying so is better than reporting a clean success.
+    const message =
+      error.code === "42501"
+        ? "The database refused this order for this account. Check its profile row."
+        : `Could not save the order: ${error.message}`;
+    return { ok: false, row: null, error: message, sheetRowId: null, sheetError: null };
+  }
+
+  console.log(
+    `[${table}] saved: ${linked.order_month} ${linked.order_year} —`,
+    linked.name || linked.insta,
+    `by ${linked.staff_name ?? "unknown"} (${linked.staff_role ?? "?"})`,
+  );
+
+  // ---- 2. The sheet, as a copy. A failure here does not lose the order. ----
+  if (!mirror.sheetPayload) {
+    return { ok: true, row: linked, error: null, sheetRowId: null, sheetError: null };
+  }
+
+  const scriptUrl = branch === "iraqi" ? IRAQI_SCRIPT_URL : SCRIPT_URL;
+  let sheetRowId: number | null = null;
+  let sheetProblem: string | null = null;
+  try {
+    const mirrored = await mirrorToSheet(
+      scriptUrl,
+      mirror.sheetPayload,
+      row.order_month,
+      mirror.primaryUrls ?? [],
+      orderKey,
+    );
+    if (mirrored.error) sheetProblem = mirrored.error;
+    else {
+      sheetRowId = mirrored.rowId;
+      console.log(`[${table}] sheet copy at row ${sheetRowId} in ${row.order_month}`);
+    }
+  } catch (err) {
+    sheetProblem = err instanceof Error ? err.message : String(err);
+  }
+
+  // ---- 3. Write the sheet's row number back onto the saved order. ----
+  //
+  // Matched on the key rather than the row number, because the key is the one thing both
+  // copies were given before either write.
+  if (sheetRowId !== null) {
+    const { error: linkError } = await supabase
+      .from(table)
+      .update({ sheet_row: sheetRowId })
+      .eq("unique_order_id", orderKey);
+    if (linkError) {
+      console.warn(`[${table}] could not store sheet row ${sheetRowId}:`, linkError.message);
+    } else {
+      linked.sheet_row = sheetRowId;
+    }
+  }
+
+  if (sheetProblem) {
+    console.warn(`[${table}] order saved, sheet copy failed:`, sheetProblem);
     return {
       ok: true,
       row: linked,
       error: null,
-      sheetRowId,
-      sheetError: `Saved to the sheet, but Supabase refused it: ${error.message}`,
+      sheetRowId: null,
+      sheetError: `The order is saved. The Google Sheet copy failed: ${sheetProblem}`,
     };
   }
 
-  console.log(
-    `[${table}] insert succeeded: ${linked.order_month} ${linked.order_year} —`,
-    linked.name || linked.insta,
-    `(${linked.unique_order_id})`,
-  );
   return { ok: true, row: linked, error: null, sheetRowId, sheetError: null };
 }
 

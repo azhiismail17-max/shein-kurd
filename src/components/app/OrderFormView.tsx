@@ -679,12 +679,13 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
           }
 
           if (result.sheetError) {
-            // The real message, not a guess at it. This branch is reached both when the
-            // sheet write fails and when Supabase refuses the row, and it used to blame
-            // the sheet either way — so an order that never reached the database was
-            // reported as a sheet problem and looked harmless.
+            // The order is saved — Supabase is written first now, and a failure there
+            // returns ok: false and never reaches here. So this only ever means the Google
+            // Sheet copy did not happen, and the order still has to appear in the list:
+            // leaving it out would look like the save had failed when it had not.
             toast.warning(result.sheetError, { duration: 10000 });
-            console.error("[order] saved with a problem:", result.sheetError);
+            console.error("[order] saved, sheet copy failed:", result.sheetError);
+            onSuccess({ ...payload, row_id: result.sheetRowId ?? undefined, _tempId: tempId });
           } else if (result.sheetRowId) {
             // Swap the temporary id for the sheet's real row number so the order can
             // be opened and edited straight away.
