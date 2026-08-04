@@ -1,42 +1,37 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import IraqiApp from "@/iraqi/IraqiApp";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
+/**
+ * /iraqi — closed.
+ *
+ * The Iraqi branch no longer takes orders. Its orders were moved into the Kurdistani table
+ * and orders_iraqi is empty, so serving the Iraqi app here would let someone fill in a form
+ * that the database is going to refuse.
+ *
+ * The route is kept rather than deleted so an old bookmark or a switcher left open in
+ * another tab lands on an explanation instead of a blank page. To reopen the branch, render
+ * IraqiApp here again — the app itself is untouched — and put the Iraq entry back in
+ * SystemSwitcher.
+ */
 export const Route = createFileRoute("/iraqi")({
-  ssr: false,
-  head: () => ({
-    meta: [{ title: "Shein Iraqi" }, { name: "description", content: "Shein Iraqi system" }],
-  }),
-  component: IraqiPage,
+  component: IraqiClosed,
 });
 
-function IraqiPage() {
-  const [iraqiRole, setIraqiRole] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Bounce non-owner Kurdistani users who poke /iraqi directly.
-    const kurdRole = localStorage.getItem("auth_role");
-    if (kurdRole && kurdRole !== "owner") {
-      window.location.href = "/";
-      return;
-    }
-    if (kurdRole === "owner" && !localStorage.getItem("iraqi_auth_role")) {
-      localStorage.setItem("iraqi_auth_role", "owner");
-      localStorage.setItem("iraqi_auth_username", localStorage.getItem("auth_username") || "owner");
-    }
-    setIraqiRole(localStorage.getItem("iraqi_auth_role"));
-    const onStorage = () => setIraqiRole(localStorage.getItem("iraqi_auth_role"));
-    window.addEventListener("storage", onStorage);
-    const interval = setInterval(onStorage, 1000);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      clearInterval(interval);
-    };
-  }, []);
-
+function IraqiClosed() {
   return (
-    <div className="iraqi-theme min-h-screen">
-      <IraqiApp />
+    <div className="flex min-h-screen items-center justify-center p-6">
+      <div className="max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+        <h1 className="text-lg font-black tracking-tight">The Iraqi branch is closed</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Every order goes to Kurdistani now. The orders that were here have been moved across, so
+          nothing has been lost.
+        </p>
+        <Link
+          to="/"
+          className="mt-5 inline-flex h-10 items-center justify-center rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground"
+        >
+          Go to Kurdistani
+        </Link>
+      </div>
     </div>
   );
 }

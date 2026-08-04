@@ -10,10 +10,17 @@ interface SystemSwitcherProps {
   variant?: "header" | "sidebar" | "brand";
 }
 
+/**
+ * The branches you can switch to.
+ *
+ * Iraq is not offered. Its orders were moved to Kurdistani and the branch is closed, so a
+ * button leading to a system that refuses to take an order is worse than no button. The
+ * "iraqi" key stays in the type and in the handler below, so putting the entry back is the
+ * only change needed to reopen it.
+ */
 const OPTIONS: { key: SystemKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "kurdistani", label: "Kurd" },
-  { key: "iraqi", label: "Iraq" },
 ];
 
 const SWITCH_LABELS: Record<SystemKey, string> = {

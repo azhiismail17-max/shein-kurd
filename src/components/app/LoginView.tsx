@@ -65,13 +65,18 @@ export const LoginView = ({ onLogin }: { onLogin: (role: string) => void }) => {
 
       // Order history comes straight from Supabase under this user's own session, so
       // there is no separate token to fetch any more.
-      if (profile.region === "iraqi") {
-        localStorage.setItem("iraqi_auth_role", profile.role);
-        localStorage.setItem("iraqi_auth_username", resolvedName);
-        window.location.href = "/iraqi";
-        return;
-      }
-
+      /*
+       * Everybody lands on Kurdistani, whatever their profile says.
+       *
+       * This used to send anyone whose profile read region = "iraqi" to /iraqi. Both
+       * moderators are recorded that way, so with the Iraqi branch closed they would have
+       * arrived at a page telling them the branch is shut and had no way through — locked
+       * out of a system they are supposed to be working in all day.
+       *
+       * Their region is left alone in the database. It still says where they belong, and it
+       * is what to read when the Iraqi branch reopens; it just no longer decides which app
+       * they are handed at sign-in.
+       */
       localStorage.setItem("auth_role", profile.role);
       localStorage.setItem("auth_username", resolvedName);
       onLogin(profile.role);
