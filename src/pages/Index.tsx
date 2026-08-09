@@ -21,6 +21,7 @@ import AppLayout from "@/components/app/AppLayout";
 import { LoginView } from "@/components/app/LoginView";
 import { SystemKey } from "@/components/app/SystemSwitcher";
 import { recordOrderDeleted } from "@/lib/teamActivity";
+import { clearCachedOrders, readCachedOrders } from "@/lib/orders-cache";
 import { loadOrders, flattenOrders, isLiveMonth, OrdersLoadError } from "@/lib/orders-source";
 import { orderMoment } from "@/lib/order-activity";
 import { supabase } from "@/lib/supabase";
@@ -85,6 +86,34 @@ const GiftCardManagerView = React.lazy(() => import("@/components/app/GiftCardMa
 
 const DEFAULT_YEAR = Object.keys(YEARS_CONFIG).sort().pop() || "2026";
 const DEFAULT_MONTH = ACTIVE_ORDER_SHEET;
+
+/** How long a remembered month is still the month you were looking at. */
+const RESUME_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * The month to open on.
+ *
+ * There are two different situations here and one answer cannot serve both. Stepping away to
+ * answer a message and coming back is the same sitting — the phone may have thrown the page
+ * out of memory, but you were looking at July and expect July. Opening the app the next
+ * morning is not the same sitting, and inheriting a month from days ago is what hid a whole
+ * month of new orders behind a stale list.
+ *
+ * So the month is remembered with the time it was chosen, and only resumed while it is
+ * recent. After that it starts on the month it actually is.
+ */
+const RESUMED_MONTH = (() => {
+  if (typeof window === "undefined") return ACTIVE_ORDER_SHEET;
+  try {
+    const saved = localStorage.getItem("app_viewingMonth");
+    const savedAt = Number(localStorage.getItem("app_viewingMonthAt") || 0);
+    const fresh = savedAt > 0 && Date.now() - savedAt < RESUME_WINDOW_MS;
+    if (saved && fresh && getAllMonths().includes(saved)) return saved;
+  } catch {
+    // A blocked or full localStorage is not a reason to fail to start.
+  }
+  return ACTIVE_ORDER_SHEET;
+})();
 const ALL_MONTHS = Object.values(YEARS_CONFIG).flat();
 const CACHE_VERSION = "full-sheet-data-v7-valid-phone-auto-links";
 const RECENT_OPTIMISTIC_MS = 15000;
@@ -178,10 +207,27 @@ const getLocalOrderKey = (id: string | number, sheet: string) => `${sheet}:${id}
 
 const Index: React.FC = () => {
   const [role, setRole] = useState<string | null>(() => localStorage.getItem("auth_role"));
+  /*
+   * The orders from last time, used for the first paint only.
+   *
+   * A phone drops a backgrounded page, so switching back is a cold start and the screen sat
+   * empty for two or three seconds while Supabase was read again. Starting from what was on
+   * screen a moment ago means the orders are there immediately; the real read runs behind it
+   * and replaces them, so nothing stale survives longer than that.
+   */
+  const cachedStart = useMemo(() => readCachedOrders(), []);
+
   const [activeTab, setActiveTab] = useState(
     () => localStorage.getItem("app_activeTab") || "orders",
   ); // default to 'orders' since it's the most common denominator
   const editReturnTabRef = useRef(localStorage.getItem("app_editReturnTab") || "orders");
+  /**
+   * The tab currently on screen.
+   *
+   * Kept in a ref so beginEditingOrder can read it without being rebuilt on every tab
+   * change, which would make every screen holding it re-render for nothing.
+   */
+  const activeTabRef = useRef(localStorage.getItem("app_activeTab") || "orders");
   const [currentSystem, setCurrentSystem] = useState<SystemKey>(() => {
     const saved = localStorage.getItem("app_currentSystem") as SystemKey | null;
     return saved === "all" || saved === "kurdistani" ? saved : "kurdistani";
@@ -214,14 +260,14 @@ const Index: React.FC = () => {
    * Switching month still works and still sticks for the rest of the session; it is only the
    * cold start that no longer inherits a month from days ago.
    */
-  const [viewingMonth, setViewingMonth] = useState(DEFAULT_MONTH);
+  const [viewingMonth, setViewingMonth] = useState(RESUMED_MONTH);
   /**
    * Months the order list and search are limited to. More than one can be picked, so
    * a search can be narrowed to one month or widened across several. `viewingMonth`
    * stays in step with the most recent pick, because the delivery, boxes and new-order
    * screens still work from a single month.
    */
-  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => [DEFAULT_MONTH]);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => [RESUMED_MONTH]);
 
   /**
    * True once a month has been tapped for the current search.
@@ -262,6 +308,7 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem("app_activeTab", activeTab);
+    activeTabRef.current = activeTab;
   }, [activeTab]);
 
   useEffect(() => {
@@ -278,18 +325,24 @@ const Index: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem("app_viewingMonth", viewingMonth);
+    // Stamped so the next start can tell "a moment ago" from "last week".
+    localStorage.setItem("app_viewingMonthAt", String(Date.now()));
     // Keeps a month chosen somewhere else — a notification, or the month falling out
     // of the available list — from leaving a stale multi-selection behind.
     setSelectedMonths((prev) => (prev.includes(viewingMonth) ? prev : [viewingMonth]));
   }, [viewingMonth]);
-  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>(() =>
+    cachedStart ? Object.values(cachedStart.months).flat() : [],
+  );
   // Surfaced on screen, so a failed load is never a silently blank page.
   const [loadError, setLoadError] = useState<string | null>(null);
   // Held in state as well as the module registry so the month picker re-renders
   // once a snapshot declares custom month names.
   const [extraYearMonths, setExtraYearMonths] = useState<Record<string, string[]>>({});
   const autoTransitInFlightRef = useRef<Set<string>>(new Set());
-  const [monthlyStats, setMonthlyStats] = useState<Record<string, MonthlyStats>>({});
+  const [monthlyStats, setMonthlyStats] = useState<Record<string, MonthlyStats>>(
+    () => cachedStart?.stats ?? {},
+  );
   const [giftCards, setGiftCards] = useState<GiftCard[]>([]);
   const [giftCardsBackendIsLegacy, setGiftCardsBackendIsLegacy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -1047,9 +1100,29 @@ const Index: React.FC = () => {
     [editingOrder, silentRefresh, viewingMonth],
   );
 
-  const beginEditingOrder = useCallback((order: Order, returnTab: string) => {
-    editReturnTabRef.current = returnTab;
-    localStorage.setItem("app_editReturnTab", returnTab);
+  /**
+   * Opens an order for editing, remembering where to come back to.
+   *
+   * The tab defaults to the one on screen rather than being named by the caller. Editing an
+   * order from the Boxes screen used to hand back "orders", so finishing the edit dropped
+   * you on the total order list instead of the box you were working through — the caller was
+   * naming a destination instead of the place you actually came from.
+   */
+  /*
+   * The local copy belongs to whoever was signed in when it was written. Clearing it on the
+   * way out means the next person to sign in on this device cannot be shown the previous
+   * one's orders for the moment before the real read lands.
+   */
+  useEffect(() => {
+    const onSignOut = () => clearCachedOrders();
+    window.addEventListener("app-signed-out", onSignOut);
+    return () => window.removeEventListener("app-signed-out", onSignOut);
+  }, []);
+
+  const beginEditingOrder = useCallback((order: Order, returnTab?: string) => {
+    const back = returnTab || activeTabRef.current || "orders";
+    editReturnTabRef.current = back;
+    localStorage.setItem("app_editReturnTab", back);
     localStorage.setItem("app_editingOrder", JSON.stringify(order));
     setEditingOrder(order);
     setActiveTab("new-order");
@@ -1400,7 +1473,7 @@ const Index: React.FC = () => {
             role={role}
             isDeliveryTab={false}
             orders={filteredOrders}
-            onEdit={(o) => beginEditingOrder(o, "orders")}
+            onEdit={(o) => beginEditingOrder(o)}
             onDelete={handleDelete}
             onOrderClick={setSelectedOrder}
             allOrders={allOrders}
@@ -1422,7 +1495,7 @@ const Index: React.FC = () => {
             role={role}
             isDeliveryTab={true}
             orders={deliveryOrders}
-            onEdit={(o) => beginEditingOrder(o, "delivery")}
+            onEdit={(o) => beginEditingOrder(o)}
             onDelete={handleDelete}
             onOrderClick={setSelectedOrder}
             allOrders={allOrders}

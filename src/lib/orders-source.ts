@@ -1,4 +1,5 @@
 import { Order, MonthlyStats } from "@/types";
+import { cacheOrders } from "@/lib/orders-cache";
 import { supabase, ORDERS_TABLE } from "@/lib/supabase";
 
 /**
@@ -224,6 +225,10 @@ export function loadOrders(): Promise<OrdersData> {
             .map(([month, list]) => `${month}:${list.length}`)
             .join(" "),
       );
+      // Kept for the next start, so returning to the app paints at once instead of waiting
+      // on this read all over again.
+      cacheOrders(months, stats);
+
       return { months, stats };
     })();
   }
