@@ -104,12 +104,24 @@ const NotificationsDropdown: React.FC<NotificationsDropdownProps> = ({
     };
     fetchNots();
     window.addEventListener("notifications:refresh", fetchNots);
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchNots();
-    }, 3000);
+    /*
+     * No polling.
+     *
+     * This used to ask Apps Script for the notifications every three seconds, and Apps
+     * Script takes ten seconds or more to answer — so requests overlapped continuously and
+     * the app was doing network work and setting state the whole time it sat open. That is
+     * the "refreshing" you feel while nothing is happening.
+     *
+     * Nothing is lost by stopping. A notification raised on this device already refreshes
+     * the list, because sendNotification fires notifications:refresh when it sends one. One
+     * raised by somebody else arrives as a phone notification. And opening the bell fetches
+     * fresh ones, which is the moment you actually want them.
+     */
+    const onOpened = () => fetchNots();
+    window.addEventListener("notifications:opened", onOpened);
     return () => {
       window.removeEventListener("notifications:refresh", fetchNots);
-      clearInterval(interval);
+      window.removeEventListener("notifications:opened", onOpened);
     };
   }, [role, rolePrefix]);
 
@@ -158,7 +170,12 @@ const NotificationsDropdown: React.FC<NotificationsDropdownProps> = ({
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          const opening = !isOpen;
+          setIsOpen(opening);
+          // Fetched when the list is actually being looked at, instead of every few seconds.
+          if (opening) window.dispatchEvent(new CustomEvent("notifications:opened"));
+        }}
         className="p-2 text-muted-foreground hover:text-primary hover:bg-secondary rounded-lg transition-colors relative"
         title="Notifications"
       >

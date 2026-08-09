@@ -146,8 +146,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({
 
   useEffect(() => {
     const currentUser = localStorage.getItem("auth_username") || role;
-    const pingPresence = () =>
+    // Skipped while the app is in the background. It is only there to show who is online,
+    // and pinging every thirty seconds from a phone sitting in somebody's pocket is work
+    // nobody asked for.
+    const pingPresence = () => {
+      if (document.visibilityState !== "visible") return;
       recordPresence("kurdistani", currentUser, role, true).catch(() => {});
+    };
     const setOffline = () => recordPresence("kurdistani", currentUser, role, false).catch(() => {});
 
     pingPresence();

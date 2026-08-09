@@ -458,13 +458,13 @@ function ResultDisplay({
   const [lang, setLang] = useState<"ku" | "ar">("ku");
 
   const generateMessage = () => {
-    const usd = calcResult.totalUsd.toFixed(2);
     const iqd = calcResult.totalIqd.toLocaleString(undefined, { maximumFractionDigits: 0 });
     const freeShip = calcResult.totalIqd > 118000;
 
     if (lang === "ar") {
-      let msg = `حضرتك القطع التي أرسلتها سعرها الإجمالي $${usd}\n`;
-      msg += `أي ما يعادل ${iqd} دينار عراقي\n\n`;
+      // The total in dinars only. It used to lead with the dollar figure and repeat it
+      // in dinars underneath — dinars are what the customer actually pays.
+      let msg = `حضرتك القطع التي أرسلتها سعرها الإجمالي ${iqd} دينار عراقي\n\n`;
       msg += `عدد القطع ${items || 0}\n\n`;
       msg += `بدون أي إضافات والدولار محسوب على 118 لحضرتك`;
       if (freeShip) {
@@ -473,8 +473,7 @@ function ResultDisplay({
       return msg;
     }
 
-    let msg = `بەرێزم ئەو پارچانەی ناردووتانە نرخی هەمووەی $${usd}\n`;
-    msg += `کە دەکاتە ${iqd} IQD\n\n`;
+    let msg = `بەرێزم ئەو پارچانەی ناردووتانە نرخی هەمووەی ${iqd} IQD\n\n`;
     msg += `ژمارەی پارچەکان ${items || 0}\n\n`;
     msg += `بەبێ ئەوەی هیچ زیادەیەکی بچیتە سەر و دۆلاریش بە 118 هەژمار کراوە بۆتان`;
     if (freeShip) {
