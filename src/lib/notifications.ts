@@ -62,10 +62,23 @@ export const sendNotification = async (
 
   if (targetRoles.length === 0) return;
 
+  /*
+   * Who sent it, added here rather than by each caller.
+   *
+   * This is the only place that knows who is signed in, so doing it once means every
+   * notification names its sender the same way — and no message can end up saying it twice
+   * or leaving it out. The name comes from the signed-in username, falling back to the role
+   * when there is no name recorded.
+   */
+  const senderName =
+    (typeof window === "undefined" ? "" : localStorage.getItem("auth_username") || "").trim() ||
+    String(senderRole || "").trim();
+  const messageWithSender = senderName ? `${message} · لەلایەن ${senderName}` : message;
+
   const notification: AppNotification = {
     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
     type,
-    message,
+    message: messageWithSender,
     senderRole,
     senderUsername: localStorage.getItem("auth_username") || undefined,
     targetRoles,

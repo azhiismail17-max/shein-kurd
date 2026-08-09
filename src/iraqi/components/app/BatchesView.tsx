@@ -759,7 +759,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       if (totalLinkWasAddedOrChanged) {
         sendNotification(
           "link",
-          totalLinkAdded(String(box.box_name), actor),
+          totalLinkAdded(String(box.box_name)),
           role,
           undefined,
           false,
@@ -769,7 +769,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       if (newWarningCount > 0) {
         sendNotification(
           "warning",
-          warningPicturesAdded(newWarningCount, String(box.box_name), actor),
+          warningPicturesAdded(newWarningCount, String(box.box_name)),
           role,
           undefined,
           true,
@@ -1191,7 +1191,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           const boxNotificationTargets = getOtherBoxLinkTargets(role);
           sendNotification(
             status === "arrived" ? "deliver" : "approve",
-            boxOrdersUpdated(ordersToUpdate.length, verb, String(box.box_name), actor),
+            boxOrdersUpdated(ordersToUpdate.length, verb, String(box.box_name)),
             role ?? null,
             undefined,
             false,

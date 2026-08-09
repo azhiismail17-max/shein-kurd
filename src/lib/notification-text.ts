@@ -4,6 +4,10 @@
  * Kept in one file so a wording change happens once rather than in eight call sites, and so
  * the phone notification and the in-app list can never drift apart.
  *
+ * Who sent a notification is not written into these messages. It is added once, in
+ * sendNotification, which is the only place that knows who is signed in — so every
+ * notification names its sender in the same way and none of them says it twice.
+ *
  * Written in Sorani. The warning wording — پارچەی نەقس, a missing piece — is the shop's own
  * phrase, so it is used exactly as given rather than translated from the English.
  */
@@ -28,8 +32,8 @@ const who = (order?: { name?: string | null; insta?: string | null }) =>
 export const warningAdded = (order?: { name?: string | null; insta?: string | null }) =>
   `پارچەی نەقس — ${who(order)}`;
 
-export const warningPicturesAdded = (count: number, boxName: string, actor: string) =>
-  `${count} وێنەی پارچەی نەقس بۆ ${boxName} زیادکرا لەلایەن ${actor}`;
+export const warningPicturesAdded = (count: number, boxName: string) =>
+  `${count} وێنەی پارچەی نەقس بۆ ${boxName} زیادکرا`;
 
 export const orderDeleted = (order?: { name?: string | null; insta?: string | null }) =>
   `ئۆردەر سڕایەوە — ${who(order)}`;
@@ -49,8 +53,7 @@ export const ordersLinked = (count: number, names: string, more: boolean) =>
 export const orderUnlinked = (order?: { name?: string | null; insta?: string | null }) =>
   `ئۆردەر لە گرووپ دەرکرا — ${who(order)}`;
 
-export const totalLinkAdded = (boxName: string, actor: string) =>
-  `لینکی کۆی گشتی بۆ ${boxName} زیادکرا لەلایەن ${actor}`;
+export const totalLinkAdded = (boxName: string) => `لینکی کۆی گشتی بۆ ${boxName} زیادکرا`;
 
-export const boxOrdersUpdated = (count: number, verb: string, boxName: string, actor: string) =>
-  `${count} ئۆردەر لە ${boxName} ${verb} لەلایەن ${actor}`;
+export const boxOrdersUpdated = (count: number, verb: string, boxName: string) =>
+  `${count} ئۆردەر لە ${boxName} ${verb}`;
