@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
+import { ordersLinked, warningAdded } from "@/lib/notification-text";
 import { updateOrderEverywhere } from "@/lib/submitOrder";
 import {
   Order,
@@ -581,7 +582,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
         .join(", ");
       sendNotification(
         "link",
-        `${selectedObjArray.length} orders linked together: ${names}${selectedObjArray.length > 4 ? "..." : ""}`,
+        ordersLinked(selectedObjArray.length, names, selectedObjArray.length > 4),
         role ?? null,
         selectedObjArray[0],
       );
@@ -738,13 +739,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
         return;
       }
 
-      sendNotification(
-        "warning",
-        `WARNING added to order: ${order.name || order.insta}. Please check!`,
-        role ?? null,
-        order,
-        true,
-      );
+      sendNotification("warning", warningAdded(order), role ?? null, order, true);
     }
 
     fetchWithRetry(SCRIPT_URL, {

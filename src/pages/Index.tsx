@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
+import { orderDeleted, orderDelivered, orderEdited, orderPurchased } from "@/lib/notification-text";
 import {
   Order,
   ApiResponse,
@@ -879,12 +880,7 @@ const Index: React.FC = () => {
       setAllOrders((prev) => prev.filter((o) => !(o.id === id && o.sheet_name === sheetName)));
 
       if (orderToDelete) {
-        sendNotification(
-          "delete",
-          `Order deleted: ${orderToDelete.name || orderToDelete.insta}`,
-          role,
-          orderToDelete,
-        );
+        sendNotification("delete", orderDeleted(orderToDelete), role, orderToDelete);
       }
 
       try {
@@ -1011,7 +1007,7 @@ const Index: React.FC = () => {
 
           if (exists) {
             // Editing existing
-            sendNotification("edit", `Order ${payload.insta || "edited"} was modified`, role, {
+            sendNotification("edit", orderEdited({ insta: payload.insta }), role, {
               id: idToFind,
               sheet_name: payload.sheet,
             });
@@ -1073,14 +1069,9 @@ const Index: React.FC = () => {
       // box-level notification instead of one per order.
       if (!options?.silent) {
         if (newStatus === "DELIVERY_SCANNED" || newStatus === "arrived") {
-          sendNotification(
-            "deliver",
-            `Order arrived/delivered: ${order.name || order.insta}`,
-            role,
-            order,
-          );
+          sendNotification("deliver", orderDelivered(order), role, order);
         } else if (newStatus === "purchased") {
-          sendNotification("approve", `Order purchased: ${order.name || order.insta}`, role, order);
+          sendNotification("approve", orderPurchased(order), role, order);
         }
       }
 

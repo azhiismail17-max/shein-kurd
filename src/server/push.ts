@@ -34,15 +34,16 @@ interface StoredOrderLogRow {
   RawPayload?: string;
 }
 
+/** Titles in Kurdish, matching what the app shows in its own notification list. */
 const NOTIFICATION_TITLES: Record<string, string> = {
-  warning: "Warning",
-  link: "Total Link",
-  delete: "Order deleted",
-  edit: "Order edited",
-  approve: "Order purchased",
-  deliver: "Order delivered",
-  cancel: "Order cancelled",
-  custom: "Update",
+  warning: "پارچەی نەقس",
+  link: "بەستنەوەی ئۆردەر",
+  delete: "ئۆردەر سڕایەوە",
+  edit: "ئۆردەر دەستکاری کرا",
+  approve: "ئۆردەر کڕدرا",
+  deliver: "ئۆردەر گەیشت",
+  cancel: "ئۆردەر هەڵوەشێنرایەوە",
+  custom: "زانیاری نوێ",
 };
 
 const getRolePrefix = (role?: string) =>
@@ -179,7 +180,11 @@ async function sendPush(request: Request) {
     return json({ error: "Phone push is not configured." }, 503);
   }
 
-  const body = (await request.json()) as { system?: string; notificationId?: string };
+  const body = (await request.json()) as {
+    system?: string;
+    notificationId?: string;
+    notification?: StoredNotification;
+  };
   const system = String(body.system || "") as SystemName;
   const notificationId = String(body.notificationId || "").trim();
   if (!(system in SCRIPT_URLS) || !notificationId) {
@@ -187,11 +192,23 @@ async function sendPush(request: Request) {
   }
 
   const scriptUrl = SCRIPT_URLS[system];
-  const notificationData = await getJson(`${scriptUrl}?action=get_notifications&t=${Date.now()}`);
-  const notifications = Array.isArray(notificationData?.notifications)
-    ? (notificationData.notifications as StoredNotification[])
-    : [];
-  const notification = notifications.find((item) => String(item.id) === notificationId);
+
+  /*
+   * The notification comes with the request when the app can send it.
+   *
+   * Reading it back out of the sheet meant this endpoint could not answer until Apps Script
+   * had finished writing it — a wait of well over ten seconds before a single phone buzzed,
+   * for a notification the caller already had in its hand. The sheet is still the fallback,
+   * for anything that only has an id to offer.
+   */
+  let notification: StoredNotification | undefined = body.notification;
+  if (!notification || !String(notification.message || "").trim()) {
+    const notificationData = await getJson(`${scriptUrl}?action=get_notifications&t=${Date.now()}`);
+    const notifications = Array.isArray(notificationData?.notifications)
+      ? (notificationData.notifications as StoredNotification[])
+      : [];
+    notification = notifications.find((item) => String(item.id) === notificationId);
+  }
   if (!notification) return json({ error: "Notification was not found." }, 404);
 
   const targetRoles = Array.isArray(notification.targetRoles)

@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { boxOrdersUpdated, totalLinkAdded, warningPicturesAdded } from "@/lib/notification-text";
 import {
   BoxLink,
   GiftCard,
@@ -758,7 +759,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       if (totalLinkWasAddedOrChanged) {
         sendNotification(
           "link",
-          `Total Link added for ${box.box_name} by ${actor}.`,
+          totalLinkAdded(String(box.box_name), actor),
           role,
           undefined,
           false,
@@ -768,7 +769,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
       if (newWarningCount > 0) {
         sendNotification(
           "warning",
-          `${newWarningCount} Warning picture${newWarningCount === 1 ? "" : "s"} added for ${box.box_name} by ${actor}.`,
+          warningPicturesAdded(newWarningCount, String(box.box_name), actor),
           role,
           undefined,
           true,
@@ -1185,11 +1186,12 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
 
         if (ordersToUpdate.length > 0 && (status === "arrived" || status === "purchased")) {
           const actor = localStorage.getItem("auth_username") || role || "admin";
-          const verb = status === "arrived" ? "arrived/delivered" : "purchased";
+          // Kurdish, because it is dropped straight into the notification text.
+          const verb = status === "arrived" ? "گەیشتن" : "کڕدران";
           const boxNotificationTargets = getOtherBoxLinkTargets(role);
           sendNotification(
             status === "arrived" ? "deliver" : "approve",
-            `${ordersToUpdate.length} order${ordersToUpdate.length === 1 ? "" : "s"} ${verb} in ${box.box_name} by ${actor}.`,
+            boxOrdersUpdated(ordersToUpdate.length, verb, String(box.box_name), actor),
             role ?? null,
             undefined,
             false,
@@ -1952,7 +1954,9 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           <div className="mt-3 flex items-center gap-2">
             <button
               onClick={() =>
-                setDeliverySelectedBoxes(new Set(deliveryReport.perBox.map((entry) => entry.box.box_name)))
+                setDeliverySelectedBoxes(
+                  new Set(deliveryReport.perBox.map((entry) => entry.box.box_name)),
+                )
               }
               className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold hover:bg-secondary/80"
             >
@@ -1967,91 +1971,98 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
           </div>
 
           <div className="mt-3 max-h-96 space-y-1.5 overflow-auto custom-scrollbar">
-            {deliveryReport.perBox.map(({ box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows }) => {
-              const displayName = box.box_name.replace(/^box[\s-]*/i, "").trim() || box.box_name;
-              const isExpanded = expandedDeliveryBox === box.box_name;
-              const isSelected = deliverySelectedBoxes.has(box.box_name);
-              return (
-                <div key={box.box_name} className="rounded-lg border border-border bg-secondary/40">
-                  <div className="flex items-center gap-2 px-2.5 py-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDeliverySelectedBoxes((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(box.box_name)) next.delete(box.box_name);
-                          else next.add(box.box_name);
-                          return next;
-                        })
-                      }
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all ${isSelected ? "border-blue-500 bg-blue-500 text-white" : "border-border bg-card hover:border-blue-500/50"}`}
-                      aria-label={`${isSelected ? "Remove" : "Add"} Box ${displayName} from Delivery totals`}
-                    >
-                      {isSelected && <Check size={10} />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedDeliveryBox((current) =>
-                          current === box.box_name ? null : box.box_name,
-                        )
-                      }
-                      className="flex flex-1 items-center justify-between gap-2 text-left"
-                    >
-                      <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold">
-                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                        Box {displayName}
-                      </span>
-                      <span className="flex flex-wrap items-center justify-end gap-1">
-                        {DELIVERY_PLACE_CATEGORIES.filter((c) => boxCategoryTotals[c] > 0).map((c) => (
-                          <span
-                            key={c}
-                            className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
-                          >
-                            {c}: {boxCategoryTotals[c].toLocaleString()}
-                          </span>
-                        ))}
-                        <span className="text-right leading-tight">
-                          <span className="block rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                            {boxTotal.toLocaleString()}
-                          </span>
-                          <span className="mt-0.5 block text-[9px] font-semibold text-muted-foreground">
-                            {boxOtherTotal.toLocaleString()}
+            {deliveryReport.perBox.map(
+              ({ box, boxTotal, boxOtherTotal, boxCategoryTotals, orderRows }) => {
+                const displayName = box.box_name.replace(/^box[\s-]*/i, "").trim() || box.box_name;
+                const isExpanded = expandedDeliveryBox === box.box_name;
+                const isSelected = deliverySelectedBoxes.has(box.box_name);
+                return (
+                  <div
+                    key={box.box_name}
+                    className="rounded-lg border border-border bg-secondary/40"
+                  >
+                    <div className="flex items-center gap-2 px-2.5 py-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeliverySelectedBoxes((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(box.box_name)) next.delete(box.box_name);
+                            else next.add(box.box_name);
+                            return next;
+                          })
+                        }
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all ${isSelected ? "border-blue-500 bg-blue-500 text-white" : "border-border bg-card hover:border-blue-500/50"}`}
+                        aria-label={`${isSelected ? "Remove" : "Add"} Box ${displayName} from Delivery totals`}
+                      >
+                        {isSelected && <Check size={10} />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedDeliveryBox((current) =>
+                            current === box.box_name ? null : box.box_name,
+                          )
+                        }
+                        className="flex flex-1 items-center justify-between gap-2 text-left"
+                      >
+                        <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold">
+                          {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          Box {displayName}
+                        </span>
+                        <span className="flex flex-wrap items-center justify-end gap-1">
+                          {DELIVERY_PLACE_CATEGORIES.filter((c) => boxCategoryTotals[c] > 0).map(
+                            (c) => (
+                              <span
+                                key={c}
+                                className="rounded-full bg-secondary px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+                              >
+                                {c}: {boxCategoryTotals[c].toLocaleString()}
+                              </span>
+                            ),
+                          )}
+                          <span className="text-right leading-tight">
+                            <span className="block rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                              {boxTotal.toLocaleString()}
+                            </span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-muted-foreground">
+                              {boxOtherTotal.toLocaleString()}
+                            </span>
                           </span>
                         </span>
-                      </span>
-                    </button>
-                  </div>
-                  {isExpanded && (
-                    <div className="space-y-1 border-t border-border px-2.5 py-1.5">
-                      {orderRows.map(({ order, onHead, otherPrice, free, category }) => (
-                        <div
-                          key={`${order.id}-${order.sheet_name}`}
-                          className="flex items-center justify-between gap-2 rounded-md bg-card px-2 py-1 text-[11px]"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-semibold">
-                              {order.name || order.insta || `#${order.id}`}
-                            </div>
-                            <div className="truncate text-[9px] text-muted-foreground">
-                              {category || order.place || "-"}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-bold tabular-nums">
-                              {onHead.toLocaleString()}
-                            </div>
-                            <div className="text-[9px] tabular-nums text-muted-foreground">
-                              {free ? "-" : otherPrice!.toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    {isExpanded && (
+                      <div className="space-y-1 border-t border-border px-2.5 py-1.5">
+                        {orderRows.map(({ order, onHead, otherPrice, free, category }) => (
+                          <div
+                            key={`${order.id}-${order.sheet_name}`}
+                            className="flex items-center justify-between gap-2 rounded-md bg-card px-2 py-1 text-[11px]"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-semibold">
+                                {order.name || order.insta || `#${order.id}`}
+                              </div>
+                              <div className="truncate text-[9px] text-muted-foreground">
+                                {category || order.place || "-"}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold tabular-nums">
+                                {onHead.toLocaleString()}
+                              </div>
+                              <div className="text-[9px] tabular-nums text-muted-foreground">
+                                {free ? "-" : otherPrice!.toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              },
+            )}
           </div>
         </div>
       )}

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
+import { orderUnlinked, warningAdded } from "@/lib/notification-text";
 import {
   Order,
   SCRIPT_URL,
@@ -273,13 +274,7 @@ const OrderDetailModal: React.FC<Props> = ({
 
       const role = localStorage.getItem("auth_role") || "unknown";
       const { sendNotification } = await import("@/lib/notifications");
-      sendNotification(
-        "warning",
-        `WARNING added to order: ${order.name || order.insta}. Please check!`,
-        role,
-        order,
-        true,
-      );
+      sendNotification("warning", warningAdded(order), role, order, true);
     } catch (err) {
       alert("Failed to upload warning image");
     } finally {
@@ -484,12 +479,7 @@ const OrderDetailModal: React.FC<Props> = ({
 
       const role = localStorage.getItem("auth_role") || "unknown";
       const { sendNotification } = await import("@/lib/notifications");
-      sendNotification(
-        "link",
-        `Order unlinked: ${targetIo.name || targetIo.insta || `#${targetIo.id}`} removed from linked group.`,
-        role,
-        targetIo,
-      );
+      sendNotification("link", orderUnlinked(targetIo), role, targetIo);
 
       onSuccess(); // Ensure it fully refreshes from backend
     } catch (err) {

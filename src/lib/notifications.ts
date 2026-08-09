@@ -82,10 +82,21 @@ export const sendNotification = async (
       notification,
     };
 
-    await fetchWithRetry(SCRIPT_URL, {
+    /*
+     * The sheet write is started, not waited for.
+     *
+     * Apps Script takes the better part of fifteen seconds to answer, and the phone push was
+     * queued behind it — so a warning about a missing piece reached everybody's phone a
+     * quarter of a minute after it was raised. The push carries the notification with it now
+     * (see below), so it no longer needs the sheet to have finished, and the two go at once.
+     */
+    const sheetWrite = fetchWithRetry(SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify(payload),
+    }).catch((error) => {
+      console.error("[notify] the sheet copy failed", error);
     });
+
     const targetRolePrefixes = targetRoles.map(
       (target) => target.trim().toLowerCase().split(/\s+/)[0],
     );
@@ -97,7 +108,14 @@ export const sendNotification = async (
         const pushResponse = await fetch("/api/push", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ system: "kurdistani", notificationId: notification.id }),
+          // The whole notification travels with the request. The server used to be handed
+          // only an id and had to read the notification back out of the sheet, which meant
+          // waiting for a write that had only just been sent.
+          body: JSON.stringify({
+            system: "kurdistani",
+            notificationId: notification.id,
+            notification,
+          }),
         });
         if (!pushResponse.ok) {
           console.error(
