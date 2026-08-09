@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { orderLinkHref } from "@/lib/order-link";
 import { boxOrdersUpdated, totalLinkAdded, warningPicturesAdded } from "@/lib/notification-text";
 import {
   BoxLink,
@@ -2967,11 +2968,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                             >
                               {order.link && (
                                 <a
-                                  href={
-                                    String(order.link).startsWith("http")
-                                      ? order.link
-                                      : `https://${order.link}`
-                                  }
+                                  href={orderLinkHref(order.link)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex h-6 w-6 items-center justify-center rounded-md bg-[#0cbaba] text-white shadow-sm transition-colors hover:bg-[#0aa3a3]"

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
+import { orderLinkHref } from "@/lib/order-link";
 import { orderUnlinked, warningAdded } from "@/lib/notification-text";
 import {
   Order,
@@ -1089,7 +1090,7 @@ const OrderDetailModal: React.FC<Props> = ({
 
               {order.link && (
                 <a
-                  href={order.link}
+                  href={orderLinkHref(order.link)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-primary text-sm hover:underline"

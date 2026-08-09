@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from "react";
+import { orderLinkHref } from "@/lib/order-link";
 import { ordersLinked, warningAdded } from "@/lib/notification-text";
 import { updateOrderEverywhere } from "@/lib/submitOrder";
 import {
@@ -984,11 +985,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                       <div className="mb-1.5 hidden gap-1 sm:flex sm:flex-wrap">
                         {order.link && (
                           <a
-                            href={
-                              String(order.link).startsWith("http")
-                                ? order.link
-                                : `https://${order.link}`
-                            }
+                            href={orderLinkHref(order.link)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium transition-colors"
@@ -1169,11 +1166,7 @@ const OrderListView: React.FC<OrderListViewProps> = ({
                       <div className="flex flex-col items-center justify-center gap-0">
                         {order.link && (
                           <a
-                            href={
-                              String(order.link).startsWith("http")
-                                ? order.link
-                                : `https://${order.link}`
-                            }
+                            href={orderLinkHref(order.link)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="h-5 w-5 rounded text-muted-foreground hover:bg-secondary hover:text-primary transition-colors flex items-center justify-center"

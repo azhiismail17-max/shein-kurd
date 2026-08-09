@@ -2,6 +2,7 @@
 const BREAK = String.fromCharCode(10);
 
 import type { ImageKind } from "@/lib/image-store";
+import { cleanOrderLink } from "@/lib/order-link";
 import { uploadOrderImages } from "@/lib/image-store";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Order, SCRIPT_URL, getOrderStatus, STATUS_COLORS } from "@/iraqi/types";
@@ -611,7 +612,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
               phone: formData.phone,
               price: sheetPrice,
               place: formData.place,
-              link: formData.link,
+              link: cleanOrderLink(formData.link),
               pics_text: formData.pics_text,
               initial_payment: formData.initial_payment,
               box_cost: formData.box_cost,

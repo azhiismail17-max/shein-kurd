@@ -2,6 +2,7 @@
 const BREAK = String.fromCharCode(10);
 
 import type { ImageKind } from "@/lib/image-store";
+import { cleanOrderLink } from "@/lib/order-link";
 import { uploadOrderImages } from "@/lib/image-store";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Order, SCRIPT_URL, getOrderStatus, STATUS_COLORS } from "@/types";
@@ -583,7 +584,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
             box_name: newBoxNameAttr || null,
             track_no: formData.trackNo?.trim() || null,
             initial_payment: toWholeNumber(formData.initial_payment),
-            link: formData.link?.trim() || null,
+            link: cleanOrderLink(formData.link) || null,
             note: cleanNote || null,
             extra: extraWithFree || null,
             primary_urls: existingPrimaryUrls.join(",") || null,
@@ -655,7 +656,7 @@ const OrderFormView: React.FC<OrderFormViewProps> = ({
               phone: formData.phone,
               price: sheetPrice,
               place: formData.place,
-              link: formData.link,
+              link: cleanOrderLink(formData.link),
               pics_text: formData.pics_text,
               initial_payment: formData.initial_payment,
               box_cost: formData.box_cost,
