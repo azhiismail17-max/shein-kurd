@@ -164,19 +164,26 @@ const Index: React.FC = () => {
     return saved && YEARS_CONFIG[saved] ? saved : DEFAULT_YEAR;
   });
   const [activeMonth, setActiveMonth] = useState(DEFAULT_MONTH);
-  const [viewingMonth, setViewingMonth] = useState(() => {
-    const saved = localStorage.getItem("app_viewingMonth");
-    return saved && getAllMonths().includes(saved) ? saved : DEFAULT_MONTH;
-  });
+  /*
+   * Opening the app starts on the month it actually is.
+   *
+   * This used to restore whichever month was last looked at, which meant a browser last
+   * used in July opened on July — and the order list only ever shows one month, so every
+   * August order was filtered out of it. The Boxes screen reads every order rather than one
+   * month, so the same orders were plainly visible there, which made it look as though the
+   * list had lost them.
+   *
+   * Switching month still works and still sticks for the rest of the session; it is only the
+   * cold start that no longer inherits a month from days ago.
+   */
+  const [viewingMonth, setViewingMonth] = useState(DEFAULT_MONTH);
   /**
    * Months the order list and search are limited to. More than one can be picked, so
    * a search can be narrowed to one month or widened across several. `viewingMonth`
    * stays in step with the most recent pick, because the delivery, boxes and new-order
    * screens still work from a single month.
    */
-  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => [
-    localStorage.getItem("app_viewingMonth") || DEFAULT_MONTH,
-  ]);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>(() => [DEFAULT_MONTH]);
 
   /**
    * True once a month has been tapped for the current search.
@@ -890,6 +897,19 @@ const Index: React.FC = () => {
       localStorage.removeItem("app_editingOrder");
       setActiveTab(wasEditing ? editReturnTabRef.current : "orders");
       localStorage.removeItem("app_editReturnTab");
+
+      /*
+       * Show the month the order actually went into.
+       *
+       * A new order always goes to the current month, but the list shows whichever month is
+       * being viewed. Saving an order while looking at an earlier month dropped you back on
+       * a list that could not contain it — the order was saved, and invisible.
+       */
+      const savedInto = String(payload?.sheet || payload?.sheet_name || "").trim();
+      if (savedInto && !wasEditing) {
+        setViewingMonth(savedInto);
+        setSelectedMonths([savedInto]);
+      }
 
       // LIVE / Optimistic update without delay!
       if (payload) {
