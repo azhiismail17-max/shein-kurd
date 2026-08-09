@@ -21,6 +21,7 @@ import { LoginView } from "@/components/app/LoginView";
 import { SystemKey } from "@/components/app/SystemSwitcher";
 import { recordOrderDeleted } from "@/lib/teamActivity";
 import { loadOrders, flattenOrders, isLiveMonth, OrdersLoadError } from "@/lib/orders-source";
+import { orderMoment } from "@/lib/order-activity";
 import { supabase } from "@/lib/supabase";
 import { deleteOrderEverywhere, updateOrderEverywhere } from "@/lib/submitOrder";
 import { registerYearMonths, getYearMonths, getAllMonths, getMonthIndex } from "@/lib/year-months";
@@ -94,10 +95,46 @@ for (const year of Object.keys(YEARS_CONFIG).sort()) {
     sheetIndex[month] = globalIdx++;
   }
 }
-const globalSort = (a: Order, b: Order) => {
-  const diff = getMonthIndex(b.sheet_name) - getMonthIndex(a.sheet_name);
-  if (diff !== 0) return diff;
-  return Number(b.id) - Number(a.id);
+/**
+ * How recent an order is, as one number, worked out once per order.
+ *
+ * Deliberately not computed inside a comparator. A sort of two thousand orders calls its
+ * comparator tens of thousands of times, and parsing a date on every call is what turned an
+ * earlier version of this sort into 36ms of work per keystroke.
+ *
+ * The date is used rather than the row number. Row number was standing in for recency, and
+ * mostly agreed with it, but it stopped being reliable once orders could exist without a
+ * sheet row: their id is a uuid, `Number()` of it is NaN, and a comparator returning NaN
+ * leaves those rows wherever they happened to be — including nowhere near the top.
+ */
+const recencyOf = (order: Order) => {
+  const at = orderMoment(order);
+  if (at) return at.getTime();
+  // No date at all: fall back to the row number, which at least orders within a month.
+  const row = Number(order.id);
+  return Number.isFinite(row) ? row : 0;
+};
+
+interface Ranked {
+  order: Order;
+  month: number;
+  recency: number;
+}
+
+/**
+ * Newest first, everywhere.
+ *
+ * Latest month at the top, and inside a month the most recent order first, so an order just
+ * saved is the first thing on the screen.
+ */
+const sortByNewest = (orders: Order[]): Order[] => {
+  const ranked: Ranked[] = orders.map((order) => ({
+    order,
+    month: getMonthIndex(order.sheet_name),
+    recency: recencyOf(order),
+  }));
+  ranked.sort((a, b) => b.month - a.month || b.recency - a.recency);
+  return ranked.map((r) => r.order);
 };
 
 const getRecentSearchMonths = (month: string) => {
@@ -1162,7 +1199,7 @@ const Index: React.FC = () => {
     return () => unsub();
   }, [role]);
 
-  const sortedOrders = useMemo(() => [...allOrders].sort(globalSort), [allOrders]);
+  const sortedOrders = useMemo(() => sortByNewest(allOrders), [allOrders]);
   const searchEntries = useMemo(
     () =>
       sortedOrders.map((order) => {
