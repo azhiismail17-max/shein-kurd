@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
+import { canonicalPhone, looksLikePhoneQuery, orderPhoneKeys } from "@/lib/phone-search";
 import { orderDeleted, orderDelivered, orderEdited, orderPurchased } from "@/lib/notification-text";
 import {
   Order,
@@ -1274,6 +1275,9 @@ const Index: React.FC = () => {
           text,
           tokens: tokenizeSearchText(text),
           digits: text.replace(/\D/g, "").replace(/^0+/, ""),
+          // The order's numbers with the country code and trunk zero taken off, so any way
+          // of writing a number finds it.
+          phones: orderPhoneKeys(order),
           orderNoText,
           orderNoDigits: orderNoText.replace(/\D/g, "").replace(/^0+/, ""),
         };
@@ -1325,6 +1329,12 @@ const Index: React.FC = () => {
       }
       const qDigits = q.replace(/\D/g, "");
       const qStripped = qDigits.replace(/^0+/, "");
+      // A phone number typed in any shape, reduced to the same form the entries carry.
+      const qPhone = looksLikePhoneQuery(q) ? canonicalPhone(q) : "";
+      if (qPhone) {
+        const byPhone = recentSearchEntries.filter((e) => e.phones.includes(qPhone));
+        if (byPhone.length) return byPhone.map((e) => e.order);
+      }
       const terms = tokenizeSearchText(q);
       const strongMatches = terms.length
         ? recentSearchEntries.filter((e) => strongTextMatch(e.tokens, terms))
@@ -1356,6 +1366,11 @@ const Index: React.FC = () => {
     if (!q) return allArrived;
     const qDigits = q.replace(/\D/g, "");
     const qStripped = qDigits.replace(/^0+/, "");
+    const qPhone = looksLikePhoneQuery(q) ? canonicalPhone(q) : "";
+    if (qPhone) {
+      const byPhone = allArrived.filter((o) => orderPhoneKeys(o).includes(qPhone));
+      if (byPhone.length) return byPhone;
+    }
     return searchEntries
       .filter(
         (e) =>
