@@ -457,6 +457,14 @@ export interface OrderUpdate {
   status?: string | null;
   primary_urls?: string | null;
   proof_urls?: string | null;
+  /**
+   * The warning picture, the one taken when something is missing from an order.
+   *
+   * It was going to the Google Sheet and to this device's localStorage and nowhere else, so
+   * the person who took the photo saw it and nobody else did. Orders are read from Supabase,
+   * so this is the column that decides whether the whole team sees it.
+   */
+  warning_url?: string | null;
   is_finished?: boolean | null;
 }
 

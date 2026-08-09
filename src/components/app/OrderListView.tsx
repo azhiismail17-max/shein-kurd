@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { updateOrderEverywhere } from "@/lib/submitOrder";
 import {
   Order,
   SCRIPT_URL,
@@ -642,6 +643,32 @@ const OrderListView: React.FC<OrderListViewProps> = ({
   // actually echoes the URL back means a silent failure surfaces here
   // instead of looking saved forever on just the uploader's phone.
   const saveWarningPicture = async (order: Order, imageUrl: string): Promise<boolean> => {
+    /*
+     * Supabase first, because Supabase is what everyone reads.
+     *
+     * This used to write the picture to the Google Sheet and cache it in this device's
+     * localStorage, and nothing else. Orders are loaded from Supabase, whose warning_url
+     * stayed empty — so the person who took the photo saw it (from their own cache) and no
+     * other admin or moderator ever did. Writing the column is what makes it the same
+     * picture for the whole team.
+     *
+     * The sheet is still written afterwards, but success is decided here: an order the
+     * database does not have the picture for is not saved, whatever the sheet says.
+     */
+    const stored = await updateOrderEverywhere(
+      "kurdistani",
+      { unique_order_id: order.unique_order_id, sheet_name: order.sheet_name, id: order.id },
+      { warning_url: imageUrl || null },
+    );
+    if (!stored.ok) {
+      console.error("[warning] Supabase refused the picture:", stored.error);
+      return false;
+    }
+    if (stored.supabaseUpdated === 0) {
+      console.error("[warning] no Supabase row matched this order — picture not saved");
+      return false;
+    }
+
     try {
       const res = await fetchWithRetry(SCRIPT_URL, {
         method: "POST",
@@ -653,9 +680,11 @@ const OrderListView: React.FC<OrderListViewProps> = ({
         }),
       });
       const result = JSON.parse(await res.text());
-      if (result?.status !== "success") return false;
-      if (imageUrl && !String(result?.warningImageUrl || result?.warningBase64 || "").trim())
-        return false;
+      if (result?.status !== "success") {
+        // The picture is already in Supabase, so the team can see it. The sheet copy
+        // failing is worth knowing about but is no longer a reason to call this a failure.
+        console.warn("[warning] saved to Supabase; the sheet copy failed:", result?.message);
+      }
       return true;
     } catch {
       return false;
