@@ -351,6 +351,15 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   const isCompactBoxView = false;
   const canUseBoxTools = !isModeratorBoxView;
   const canManageBoxLinks = role === "owner" || role === "admin";
+  /**
+   * The owner is never locked out.
+   *
+   * Marking a box finished stops it being edited, which is right for everybody else — a
+   * finished box is a closed account and a moderator changing its cost afterwards would move
+   * money nobody is watching. But it applied to the owner too, so correcting a mistake on a
+   * finished box was impossible for the one person who should always be able to.
+   */
+  const canOverrideLock = role === "owner";
   const [expandedBox, setExpandedBox] = useState<string | null>(() =>
     localStorage.getItem("batches_expanded_box"),
   );
@@ -1210,7 +1219,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
 
   const handleRenameBox = useCallback(
     async (box: BoxGroup) => {
-      if (box.isFinished) return;
+      if (box.isFinished && !canOverrideLock) return;
       const nextBoxName = renameInput.trim();
       if (!nextBoxName || nextBoxName === box.box_name) {
         setRenamingBox(null);
@@ -1283,7 +1292,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
 
   const handleBoxStatusChange = useCallback(
     async (box: BoxGroup, newStatus: string) => {
-      if (box.isFinished) return;
+      if (box.isFinished && !canOverrideLock) return;
       preserveBatchPosition();
       const status = newStatus as BoxGroup["status"];
       setIsSyncing(true);
@@ -1316,12 +1325,12 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         setIsSyncing(false);
       }
     },
-    [onStatusChange, preserveBatchPosition, role],
+    [onStatusChange, preserveBatchPosition, role, canOverrideLock],
   );
 
   const handleSaveField = useCallback(
     async (box: BoxGroup, field: string) => {
-      if (box.isFinished) return;
+      if (box.isFinished && !canOverrideLock) return;
       preserveBatchPosition();
       const value = parseMoneyInput(fieldInput);
       if (field === "lost" || field === "profit") markSplitManual(box.box_name, field);
@@ -1623,6 +1632,22 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         </div>
         {editingField?.box === box.box_name && editingField?.field === field ? (
           <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              // A phone shows a number pad for inputMode="decimal" and that pad has no minus
+              // key, so a negative figure could not be typed at all on the device this is
+              // mostly used on. This flips the sign of whatever is in the box.
+              onClick={(e) => {
+                e.stopPropagation();
+                setFieldInput((prev) =>
+                  prev.trim().startsWith("-") ? prev.trim().slice(1) : `-${prev.trim()}`,
+                );
+              }}
+              className="mb-1 rounded-md border border-primary/40 bg-secondary px-2 py-1 text-xs font-bold tabular-nums"
+              title="Make it negative, or positive again"
+            >
+              ±
+            </button>
             <input
               value={fieldInput}
               onChange={(e) => setFieldInput(e.target.value)}
@@ -1668,7 +1693,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
             className={`min-h-10 sm:min-h-0 text-sm font-bold hover:opacity-80 transition-colors flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-70 ${field === "lost" ? "text-destructive" : field === "profit" ? "text-primary" : ""}`}
           >
             {displayValue > 0 ? `${displayValue.toLocaleString()} IQD` : "Set"}{" "}
-            {!box.isFinished && <Edit2 size={10} />}
+            {(!box.isFinished || canOverrideLock) && <Edit2 size={10} />}
           </button>
         )}
       </div>
