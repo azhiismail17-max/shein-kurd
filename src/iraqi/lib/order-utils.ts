@@ -275,7 +275,24 @@ function buildClusters(allOrders: Order[]): Map<string, Order[]> {
     for (const id of order.linkedOrderIds || []) {
       if (isUnlinkMarker(id)) continue;
       const other = normalizeLinkedKey(id, order.sheet_name);
-      if (!byKey.has(other) || blocked.has(pairKey(key, other))) continue;
+      const target = byKey.get(other);
+      if (!target || blocked.has(pairKey(key, other))) continue;
+
+      /*
+       * A link made by hand still has to be the same customer, within the week.
+       *
+       * This used to join the two orders on sight, on the reasoning that a person had chosen
+       * it deliberately. That was wrong: a mistaken tap, or a reference left behind by an
+       * older bug, then merged two unrelated customers into one receipt permanently — and no
+       * amount of care in the screens that create links could undo one already recorded.
+       *
+       * Both conditions are checked here instead, every time the group is built, so a link
+       * between different phone numbers simply stops joining them. Same rule as an automatic
+       * link: the same number, no more than seven days apart.
+       */
+      if (!hasSameValidPhone(order, target)) continue;
+      if (!isWithinLinkWindow(order, target)) continue;
+
       union(key, other);
     }
   }

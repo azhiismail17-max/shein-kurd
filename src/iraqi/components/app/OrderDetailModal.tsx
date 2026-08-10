@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
+import { wallClock } from "@/lib/order-activity";
 import { orderLinkHref } from "@/lib/order-link";
 import { orderUnlinked, warningAdded } from "@/lib/notification-text";
 import { deleteOrderEverywhere } from "@/lib/submitOrder";
@@ -230,6 +231,18 @@ const OrderDetailModal: React.FC<Props> = ({
   const receiptBoxNumber = String(getBoxName(order) || "")
     .replace(/^box[\s-]*/i, "")
     .trim();
+
+  /**
+   * The day the order was sent, written the way people write it: 10-8-2026.
+   *
+   * Read through wallClock so it is the day recorded, not the day the viewer's timezone
+   * shifts it to — the stored timestamps carry a +00:00 offset but hold local readings.
+   */
+  const receiptDate = (() => {
+    const clock = wallClock({ date: order.date ?? null });
+    if (!clock) return "-";
+    return `${clock.day}-${clock.month + 1}-${clock.year}`;
+  })();
 
   const handleWarningImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -918,14 +931,35 @@ const OrderDetailModal: React.FC<Props> = ({
                     Receipt
                   </span>
                   <h1 className="text-xl font-bold tracking-tight uppercase">SHEIN KURDISTANI</h1>
+                  {/*
+                    The day it was sent, the box, and whether it was free. Nothing else.
+
+                    The date used to be order.date.split(" ")[0], which was written for the
+                    old "D/M HH:MM" text. An ISO timestamp has no space in it, so the split
+                    returned the whole thing and the receipt showed
+                    2026-08-10T10:42:50+00:00 — a machine timestamp on a customer's receipt.
+
+                    The order number is only shown when there is one. It printed "#PENDING"
+                    otherwise, which tells the customer nothing.
+                  */}
                   <div className="flex items-center justify-center gap-2 text-[10px] text-muted-foreground">
-                    <span>{order.date?.split(" ")[0] || "-"}</span>
-                    <span className="w-1 h-1 rounded-full bg-border" />
-                    <span>#{cleanOrderNo(order.orderNo) || "PENDING"}</span>
+                    <span>{receiptDate}</span>
+                    {cleanOrderNo(order.orderNo) && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-border" />
+                        <span>#{cleanOrderNo(order.orderNo)}</span>
+                      </>
+                    )}
                     {receiptBoxNumber && (
                       <>
                         <span className="w-1 h-1 rounded-full bg-border" />
                         <span>{receiptBoxNumber}</span>
+                      </>
+                    )}
+                    {isOrderFree(order) && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-border" />
+                        <span className="font-bold text-primary">FREE</span>
                       </>
                     )}
                   </div>
