@@ -2199,7 +2199,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                           e.stopPropagation();
                           if (canManageBoxLinks) openBoxLinkEditor(box);
                         }}
-                        className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 ${canManageBoxLinks ? "hover:scale-105" : "cursor-default"} ${hasSavedBoxLink ? "bg-emerald-500 text-white shadow-sm" : box.isBought ? "bg-violet-600 text-white shadow-sm dark:bg-violet-500" : isBoxLinkOpen ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400" : "bg-amber-50 text-amber-500 dark:bg-amber-500/10"}`}
+                        className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 ${canManageBoxLinks ? "hover:scale-105" : "cursor-default"} ${box.isBought ? "bg-violet-600 text-white shadow-sm dark:bg-violet-500" : hasSavedBoxLink ? "bg-emerald-500 text-white shadow-sm" : isBoxLinkOpen ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400" : "bg-amber-50 text-amber-500 dark:bg-amber-500/10"}`}
                         title={
                           canManageBoxLinks ? "Total Link, pictures, and warnings" : box.box_name
                         }

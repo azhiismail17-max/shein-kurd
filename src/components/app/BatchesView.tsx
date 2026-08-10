@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { loadBoxLinks, saveBoxLink } from "@/lib/box-links";
 import { orderLinkHref } from "@/lib/order-link";
 import { boxOrdersUpdated, totalLinkAdded, warningPicturesAdded } from "@/lib/notification-text";
 import {
@@ -476,20 +477,38 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
   );
 
   const refreshBoxLinks = useCallback(async () => {
-    if (!canManageBoxLinks) return;
-    try {
-      const res = await fetchWithRetry(
-        `${SCRIPT_URL}?action=get_box_links&role=${encodeURIComponent(role || "")}&t=${Date.now()}`,
+    /*
+     * Read from Supabase, for everybody.
+     *
+     * The guard here used to return early for anyone who is not a manager, and the read went
+     * to an Apps Script action the deployed script does not answer — so the only copy of a
+     * box link was the one in the browser that saved it. Reading is open to all staff now;
+     * saving is still limited to the owner and admins, both in the panel below and by the
+     * database policy.
+     */
+    const { links } = await loadBoxLinks(viewingMonth);
+    if (links.length) {
+      setBoxLinks(
+        mergeBoxLinks(
+          links.map((row) => ({
+            id: `${row.sheet_name}:${row.box_name}`,
+            sheet_name: row.sheet_name,
+            box_name: row.box_name,
+            total_link: row.total_link || "",
+            image_url: serializeBoxLinkMedia({
+              pictures: row.pictures,
+              warnings: row.warnings,
+            }),
+            pictures: row.pictures,
+            warnings: row.warnings,
+            updated_at: row.updated_at || "",
+            updated_by: row.updated_by_name || "",
+            updated_role: "",
+          })),
+        ),
       );
-      const text = await res.text();
-      const json = JSON.parse(text);
-      if (json?.status === "success" && Array.isArray(json.box_links)) {
-        setBoxLinks(mergeBoxLinks(json.box_links));
-      }
-    } catch (e) {
-      console.warn("Box links fetch failed", e);
     }
-  }, [canManageBoxLinks, role]);
+  }, [viewingMonth]);
 
   useEffect(() => {
     refreshBoxLinks();
@@ -819,6 +838,25 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
         updated_role: role || "",
       };
       writeLocalBoxLink(optimisticLink);
+      /*
+       * Written to Supabase, which is the copy everybody else reads.
+       *
+       * The local copy above keeps the panel responsive; this is what makes the link exist
+       * for the rest of the shop. A failure is surfaced rather than swallowed, because a link
+       * that looks saved and is visible to nobody is the bug being fixed here.
+       */
+      void saveBoxLink({
+        boxName: box.box_name,
+        sheetName,
+        totalLink: nextTotalLink,
+        pictures: draft.pictures,
+        warnings: draft.warnings,
+      }).then((saved) => {
+        if (!saved.ok) {
+          console.error("[box links] not saved to Supabase:", saved.error);
+          toast.error(saved.error);
+        }
+      });
       setBoxLinks((prev) => [
         optimisticLink,
         ...prev.filter(
@@ -2281,7 +2319,7 @@ const BatchesView: React.FC<Props & { role?: string }> = ({
                           e.stopPropagation();
                           if (canManageBoxLinks) openBoxLinkEditor(box);
                         }}
-                        className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 ${canManageBoxLinks ? "hover:scale-105" : "cursor-default"} ${hasSavedBoxLink ? "bg-emerald-500 text-white shadow-sm" : box.isBought ? "bg-violet-600 text-white shadow-sm dark:bg-violet-500" : isBoxLinkOpen ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400" : "bg-amber-50 text-amber-500 dark:bg-amber-500/10"}`}
+                        className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-primary/40 ${canManageBoxLinks ? "hover:scale-105" : "cursor-default"} ${box.isBought ? "bg-violet-600 text-white shadow-sm dark:bg-violet-500" : hasSavedBoxLink ? "bg-emerald-500 text-white shadow-sm" : isBoxLinkOpen ? "bg-emerald-500/15 text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-400" : "bg-amber-50 text-amber-500 dark:bg-amber-500/10"}`}
                         title={
                           canManageBoxLinks ? "Total Link, pictures, and warnings" : box.box_name
                         }
